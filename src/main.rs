@@ -1,6 +1,7 @@
 use support_library::structures::stack::Stack;
 use support_library::structures::queue::Queue;
-use support_library::structures::tree::BinaryTree;
+use support_library::structures::tree::Tree;
+use support_library::structures::map::MyMap;
 
 use support_library::helpers::logger::{log, LogLevel};
 
@@ -17,7 +18,7 @@ fn main() {
     stack.push(20);
 
     stack.print();
-
+    
     // QUEUE
     let mut queue = Queue::new();
 
@@ -27,11 +28,18 @@ fn main() {
     queue.print();
 
     // TREE
-    let tree = BinaryTree::new()
+    let tree = Tree::new()
         .insert(10)
         .insert(5)
         .insert(15);
 
     tree.print();
+
+    // MAP
+    let mut map = MyMap::new();
+
+    map.insert("nombre", "Santiago");
+
+    map.print();
 
 }

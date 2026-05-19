@@ -1,0 +1,3 @@
+Editar file_reader y file_writer para segmentar la lectura y escritura.
+
+Hacer que el logger guarde la info en un archivo txt.
