@@ -1,4 +1,4 @@
-use crate::tokens::Token; // Importamos el enum del archivo tokens.rs
+use crate::tokens::Token; 
 
 pub struct Lexer {
     input: Vec<char>,
@@ -59,7 +59,7 @@ impl Lexer {
         self.skip_whitespace();
 
         let token = match self.ch {
-            '=' => Token::Assign,
+            '=' => Token::AssignOperator,
             '+' => Token::Plus,
             ';' => Token::Semicolon,
             '\0' => Token::EOF,
@@ -67,7 +67,7 @@ impl Lexer {
                 if self.ch.is_alphabetic() || self.ch == '_' {
                     let ident = self.read_identifier();
                     return match ident.as_str() {
-                        "let" => Token::Let,
+                        "let" => Token::KeyWord,
                         _ => Token::Identifier(ident),
                     };
                 } else if self.ch.is_numeric() {

@@ -1,7 +1,7 @@
 #[derive(Debug, PartialEq, Clone)]
 pub enum Token {
-    Let,
-    Assign,
+    KeyWord,
+    AssignOperator,
     Plus,
     Semicolon,
     Identifier(String),
