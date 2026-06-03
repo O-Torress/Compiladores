@@ -61,7 +61,7 @@ impl Lexer {
 
     fn lookup_ident(&self, ident: String) -> Token {
         match ident.as_str() {
-            "let" | "int" | "float" | "if" | "else" => Token::KeyWord(ident),
+            "void" | "int" | "float" | "if" | "else"  => Token::KeyWord(ident),
             _ => Token::Identifier(ident),
         }
     }
