@@ -1,5 +1,9 @@
 use crate::tokens::Token; 
 
+const OPERATORS: [char; 3] = ['=', '+', '-'];
+const PUNCTUATION: [char; 3] = [';', ',', '.'];
+const DELIMITERS: [char; 4] = ['[', ']', '(', ')'];
+
 pub struct Lexer {
     input: Vec<char>,
     position: usize,
@@ -58,27 +62,42 @@ impl Lexer {
     pub fn next_token(&mut self) -> Token {
         self.skip_whitespace();
 
-        let token = match self.ch {
-            '=' => Token::AssignOperator,
-            '+' => Token::Plus,
-            ';' => Token::Semicolon,
-            '\0' => Token::EOF,
-            _ => {
-                if self.ch.is_alphabetic() || self.ch == '_' {
-                    let ident = self.read_identifier();
-                    return match ident.as_str() {
-                        "let" => Token::KeyWord,
-                        _ => Token::Identifier(ident),
-                    };
-                } else if self.ch.is_numeric() {
-                    return Token::Number(self.read_number());
-                } else {
-                    Token::Illegal(self.ch)
-                }
-            }
-        };
+        if self.ch == '\0' {
+            return Token::EOF;
+        }
 
+        if self.ch.is_alphabetic() || self.ch == '_' {
+            let ident = self.read_identifier();
+            return match ident.as_str() {
+                "let" => Token::KeyWord,
+                _ => Token::Identifier(ident),
+            };
+        }
+
+        if self.ch.is_numeric() {
+            return Token::Number(self.read_number());
+        }
+
+        if OPERATORS.contains(&self.ch) {
+            let operator = self.ch;
+            self.read_char();
+            return Token::Operator(operator);
+        }
+
+        if PUNCTUATION.contains(&self.ch) {
+            let punctuation = self.ch;
+            self.read_char();
+            return Token::Punctuation(punctuation);
+        }
+
+        if DELIMITERS.contains(&self.ch) {
+            let delimiter = self.ch;
+            self.read_char();
+            return Token::Delimiter(delimiter);
+        }
+
+        let illegal = self.ch;
         self.read_char();
-        token
+        Token::Illegal(illegal)
     }
 }

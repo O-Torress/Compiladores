@@ -9,9 +9,9 @@ fn test_lexer_basico() {
     let tokens_esperados = vec![
         Token::KeyWord,
         Token::Identifier("y".to_string()),
-        Token::AssignOperator,
+        Token::Operator('='),
         Token::Number(5),
-        Token::Semicolon,
+        Token::Punctuation(';'),
         Token::EOF,
     ];
 
