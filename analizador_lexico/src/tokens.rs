@@ -1,6 +1,6 @@
 #[derive(Debug, PartialEq, Clone)]
 pub enum Token {
-    KeyWord,
+    KeyWord(String),
     Operator(char),
     Punctuation(char),
     Delimiter(char),

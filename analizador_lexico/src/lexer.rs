@@ -2,7 +2,7 @@ use crate::tokens::Token;
 
 const OPERATORS: [char; 3] = ['=', '+', '-'];
 const PUNCTUATION: [char; 3] = [';', ',', '.'];
-const DELIMITERS: [char; 4] = ['[', ']', '(', ')'];
+const DELIMITERS: [char; 6] = ['[', ']', '(', ')','{','}'];
 
 pub struct Lexer {
     input: Vec<char>,
@@ -59,6 +59,13 @@ impl Lexer {
             .unwrap_or(0)
     }
 
+    fn lookup_ident(&self, ident: String) -> Token {
+        match ident.as_str() {
+            "let" | "int" | "float" | "if" | "else" => Token::KeyWord(ident),
+            _ => Token::Identifier(ident),
+        }
+    }
+
     pub fn next_token(&mut self) -> Token {
         self.skip_whitespace();
 
@@ -68,10 +75,7 @@ impl Lexer {
 
         if self.ch.is_alphabetic() || self.ch == '_' {
             let ident = self.read_identifier();
-            return match ident.as_str() {
-                "let" => Token::KeyWord,
-                _ => Token::Identifier(ident),
-            };
+            return self.lookup_ident(ident);
         }
 
         if self.ch.is_numeric() {

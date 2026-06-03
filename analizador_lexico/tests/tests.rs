@@ -7,7 +7,7 @@ fn test_lexer_basico() {
     let mut l = Lexer::new(input);
 
     let tokens_esperados = vec![
-        Token::KeyWord,
+        Token::KeyWord("let".to_string()),
         Token::Identifier("y".to_string()),
         Token::Operator('='),
         Token::Number(5),
