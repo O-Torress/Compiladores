@@ -1,7 +1,7 @@
 use crate::tokens::Token; 
 
-const OPERATORS: [char; 3] = ['=', '+', '-'];
-const PUNCTUATION: [char; 3] = [';', ',', '.'];
+const OPERATORS: [char; 11] = ['=', '+', '-', '*', '/', '%', '!', '<', '>', '&', '|'];
+const PUNCTUATION: [char; 4] = [';', ',', '.', ':'];
 const DELIMITERS: [char; 6] = ['[', ']', '(', ')','{','}'];
 
 pub struct Lexer {
@@ -33,6 +33,14 @@ impl Lexer {
         self.read_position += 1;
     }
 
+    fn peek_char(&self) -> char {
+        if self.read_position >= self.input.len() {
+            '\0'
+        } else {
+            self.input[self.read_position]
+        }
+    }
+
     fn skip_whitespace(&mut self) {
         while self.ch.is_whitespace() {
             self.read_char();
@@ -41,27 +49,70 @@ impl Lexer {
 
     fn read_identifier(&mut self) -> String {
         let start = self.position;
-        while self.ch.is_alphabetic() || self.ch == '_' {
+        while self.ch.is_alphanumeric() || self.ch == '_' {
             self.read_char();
         }
         self.input[start..self.position].iter().collect()
     }
 
-    fn read_number(&mut self) -> i32 {
+    fn read_number(&mut self) -> String {
         let start = self.position;
-        while self.ch.is_numeric() {
+        let mut has_dot = false;
+
+        while self.ch.is_numeric() || (self.ch == '.' && !has_dot) {
+            if self.ch == '.' {
+                has_dot = true;
+            }
             self.read_char();
         }
-        self.input[start..self.position]
-            .iter()
-            .collect::<String>()
-            .parse()
-            .unwrap_or(0)
+
+        self.input[start..self.position].iter().collect()
+    }
+
+    fn read_string(&mut self) -> String {
+        self.read_char();
+        let start = self.position;
+        while self.ch != '"' && self.ch != '\0' {
+            self.read_char();
+        }
+        let value: String = self.input[start..self.position].iter().collect();
+        if self.ch == '"' {
+            self.read_char();
+        }
+        value
+    }
+
+    fn read_char_literal(&mut self) -> Option<char> {
+        self.read_char();
+
+        let ch = if self.ch == '\\' {
+            self.read_char();
+            match self.ch {
+                'n' => '\n',
+                't' => '\t',
+                'r' => '\r',
+                '\\' => '\\',
+                '\'' => '\'',
+                '"' => '"',
+                '0' => '\0',
+                other => other,
+            }
+        } else {
+            self.ch
+        };
+
+        self.read_char();
+        if self.ch == '\'' {
+            self.read_char();
+            Some(ch)
+        } else {
+            None
+        }
     }
 
     fn lookup_ident(&self, ident: String) -> Token {
         match ident.as_str() {
-            "void" | "int" | "float" | "if" | "else"  => Token::KeyWord(ident),
+            "void" | "int" | "double" | "char" | "if" | "else" | "while" | "return" | "let" | "do" => Token::KeyWord(ident),
             _ => Token::Identifier(ident),
         }
     }
@@ -78,14 +129,95 @@ impl Lexer {
             return self.lookup_ident(ident);
         }
 
+        if self.ch == '"' {
+            return Token::StringLiteral(self.read_string());
+        }
+
+        if self.ch == '\'' {
+            return match self.read_char_literal() {
+                Some(c) => Token::CharLiteral(c),
+                None => Token::Illegal('\''),
+            };
+        }
+
         if self.ch.is_numeric() {
             return Token::Number(self.read_number());
         }
 
         if OPERATORS.contains(&self.ch) {
             let operator = self.ch;
-            self.read_char();
-            return Token::Operator(operator);
+            let token = match (self.ch, self.peek_char()) {
+                ('=', '=') => {
+                    self.read_char();
+                    self.read_char();
+                    Token::Operator("==".to_string())
+                }
+                ('!', '=') => {
+                    self.read_char();
+                    self.read_char();
+                    Token::Operator("!=".to_string())
+                }
+                ('<', '=') => {
+                    self.read_char();
+                    self.read_char();
+                    Token::Operator("<=".to_string())
+                }
+                ('>', '=') => {
+                    self.read_char();
+                    self.read_char();
+                    Token::Operator(">=".to_string())
+                }
+                ('&', '&') => {
+                    self.read_char();
+                    self.read_char();
+                    Token::Operator("&&".to_string())
+                }
+                ('|', '|') => {
+                    self.read_char();
+                    self.read_char();
+                    Token::Operator("||".to_string())
+                }
+                ('+', '+') => {
+                    self.read_char();
+                    self.read_char();
+                    Token::Operator("++".to_string())
+                }
+                ('-', '-') => {
+                    self.read_char();
+                    self.read_char();
+                    Token::Operator("--".to_string())
+                }
+                ('+', '=') => {
+                    self.read_char();
+                    self.read_char();
+                    Token::Operator("+=".to_string())
+                }
+                ('-', '=') => {
+                    self.read_char();
+                    self.read_char();
+                    Token::Operator("-=".to_string())
+                }
+                ('*', '=') => {
+                    self.read_char();
+                    self.read_char();
+                    Token::Operator("*=".to_string())
+                }
+                ('/', '=') => {
+                    self.read_char();
+                    self.read_char();
+                    Token::Operator("/=".to_string())
+                }
+                ('%', '=') => {
+                    self.read_char();
+                    self.read_char();
+                    Token::Operator("%=".to_string())
+                }
+                _ => {
+                    self.read_char();
+                    Token::Operator(operator.to_string())
+                }
+            };
+            return token;
         }
 
         if PUNCTUATION.contains(&self.ch) {

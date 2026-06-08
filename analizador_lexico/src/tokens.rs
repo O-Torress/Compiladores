@@ -1,11 +1,13 @@
 #[derive(Debug, PartialEq, Clone)]
 pub enum Token {
     KeyWord(String),
-    Operator(char),
+    Operator(String),
     Punctuation(char),
     Delimiter(char),
     Identifier(String),
-    Number(i32),
+    Number(String),
+    StringLiteral(String),
+    CharLiteral(char),
     EOF,
     Illegal(char),
 }
