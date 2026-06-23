@@ -1,5 +1,5 @@
 use analizador_lexico::lexer::Lexer;
-use analizador_lexico::tokens::Token;
+use analizador_lexico::tokens::{Token, TokenInfo};
 
 #[test]
 fn test_lexer_basico() {
@@ -17,6 +17,29 @@ fn test_lexer_basico() {
 
     for token_esperado in tokens_esperados {
         assert_eq!(l.next_token(), token_esperado);
+    }
+}
+
+#[test]
+fn test_lexer_token_positions() {
+    let input = "let x = 1;\n  y = 2;";
+    let mut l = Lexer::new(input);
+
+    let tokens_esperados = vec![
+        TokenInfo { token: Token::KeyWord("let".to_string()), line: 1, column: 1 },
+        TokenInfo { token: Token::Identifier("x".to_string()), line: 1, column: 5 },
+        TokenInfo { token: Token::Operator("=".to_string()), line: 1, column: 7 },
+        TokenInfo { token: Token::Number("1".to_string()), line: 1, column: 9 },
+        TokenInfo { token: Token::Punctuation(';'), line: 1, column: 10 },
+        TokenInfo { token: Token::Identifier("y".to_string()), line: 2, column: 3 },
+        TokenInfo { token: Token::Operator("=".to_string()), line: 2, column: 5 },
+        TokenInfo { token: Token::Number("2".to_string()), line: 2, column: 7 },
+        TokenInfo { token: Token::Punctuation(';'), line: 2, column: 8 },
+        TokenInfo { token: Token::EOF, line: 2, column: 9 },
+    ];
+
+    for expected in tokens_esperados {
+        assert_eq!(l.next_token_with_position(), expected);
     }
 }
 

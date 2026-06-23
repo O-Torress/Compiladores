@@ -11,3 +11,10 @@ pub enum Token {
     EOF,
     Illegal(char),
 }
+
+#[derive(Debug, PartialEq, Clone)]
+pub struct TokenInfo {
+    pub token: Token,
+    pub line: usize,
+    pub column: usize,
+}

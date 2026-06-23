@@ -9,6 +9,8 @@ pub struct Lexer {
     position: usize,
     read_position: usize,
     ch: char,
+    line: usize,
+    column: usize,
 }
 
 impl Lexer {
@@ -18,6 +20,8 @@ impl Lexer {
             position: 0,
             read_position: 0,
             ch: '\0',
+            line: 1,
+            column: 0,
         };
         lexer.read_char();
         lexer
@@ -31,6 +35,13 @@ impl Lexer {
         };
         self.position = self.read_position;
         self.read_position += 1;
+
+        if self.ch == '\n' {
+            self.line += 1;
+            self.column = 0;
+        } else {
+            self.column += 1;
+        }
     }
 
     fn peek_char(&self) -> char {
@@ -117,7 +128,7 @@ impl Lexer {
         }
     }
 
-    pub fn next_token(&mut self) -> Token {
+    fn next_token_inner(&mut self) -> Token {
         self.skip_whitespace();
 
         if self.ch == '\0' {
@@ -235,5 +246,22 @@ impl Lexer {
         let illegal = self.ch;
         self.read_char();
         Token::Illegal(illegal)
+    }
+
+    pub fn next_token(&mut self) -> Token {
+        self.next_token_with_position().token
+    }
+
+    pub fn next_token_with_position(&mut self) -> crate::tokens::TokenInfo {
+        self.skip_whitespace();
+        let start_line = self.line;
+        let start_column = self.column;
+
+        let token = self.next_token_inner();
+        crate::tokens::TokenInfo {
+            token,
+            line: start_line,
+            column: start_column,
+        }
     }
 }

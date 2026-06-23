@@ -21,12 +21,13 @@ fn main() {
     };
 
     let mut lexer = Lexer::new(&un_codigo);
+
     println!("--- Iniciando Análisis Léxico ---");
     loop {
-        let token = lexer.next_token();
-        println!("{:?}", token);
+        let token_info = lexer.next_token_with_position();
+        println!("{:?} (line {}, column {})", token_info.token, token_info.line, token_info.column);
 
-        if token == Token::EOF {
+        if token_info.token == Token::EOF {
             break;
         }
     }
