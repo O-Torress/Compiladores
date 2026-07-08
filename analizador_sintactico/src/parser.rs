@@ -81,12 +81,13 @@ impl Statement {
         let padding = "  ".repeat(indent);
         match self {
             Statement::Declaration { kind, name, value } => {
-                match kind {
-                    DeclarationKind::Typed(kind) => println!("{}Declaration ({}) {}", padding, kind, name),
-                    DeclarationKind::Let => println!("{}Declaration (let) {}", padding, name),
-                }
+                let kind_label = match kind {
+                    DeclarationKind::Typed(k) => format!("Declaration ({}) {}", k, name),
+                    DeclarationKind::Let => format!("Declaration (let) {}", name),
+                };
+                println!("{}{}", padding, kind_label);
                 if let Some(value) = value {
-                    println!("{}  Initializer:", padding);
+                    println!("{}  +-- Initializer", padding);
                     value.print(indent + 2);
                 }
             }
@@ -96,27 +97,27 @@ impl Statement {
             }
             Statement::If { condition, consequence, alternative } => {
                 println!("{}If", padding);
-                println!("{}  Condition:", padding);
+                println!("{}  +-- Condition", padding);
                 condition.print(indent + 2);
-                println!("{}  Then:", padding);
+                println!("{}  +-- Then", padding);
                 consequence.print(indent + 2);
                 if let Some(alternative) = alternative {
-                    println!("{}  Else:", padding);
+                    println!("{}  +-- Else", padding);
                     alternative.print(indent + 2);
                 }
             }
             Statement::While { condition, body } => {
                 println!("{}While", padding);
-                println!("{}  Condition:", padding);
+                println!("{}  +-- Condition", padding);
                 condition.print(indent + 2);
-                println!("{}  Body:", padding);
+                println!("{}  +-- Body", padding);
                 body.print(indent + 2);
             }
             Statement::DoWhile { body, condition } => {
                 println!("{}DoWhile", padding);
-                println!("{}  Body:", padding);
+                println!("{}  +-- Body", padding);
                 body.print(indent + 2);
-                println!("{}  Condition:", padding);
+                println!("{}  +-- Condition", padding);
                 condition.print(indent + 2);
             }
             Statement::Return(expr) => {
@@ -140,9 +141,9 @@ impl Expression {
         let padding = "  ".repeat(indent);
         match self {
             Expression::Assignment { target, operator, value } => {
-                println!("{}Assignment {}", padding, operator);
-                println!("{}  Target: {}", padding, target);
-                println!("{}  Value:", padding);
+                println!("{}Assignment ({})", padding, operator);
+                println!("{}  +-- Target: {}", padding, target);
+                println!("{}  +-- Value", padding);
                 value.print(indent + 2);
             }
             Expression::Binary { operator, left, right } => {
@@ -155,16 +156,16 @@ impl Expression {
                 operand.print(indent + 1);
             }
             Expression::Call { name, arguments } => {
-                println!("{}Call {}", padding, name);
+                println!("{}Call ({})", padding, name);
                 for argument in arguments {
                     argument.print(indent + 1);
                 }
             }
             Expression::Identifier(name) => {
-                println!("{}Identifier {}", padding, name);
+                println!("{}Identifier ({})", padding, name);
             }
             Expression::Literal(literal) => {
-                println!("{}Literal {}", padding, literal);
+                println!("{}Literal ({})", padding, literal);
             }
         }
     }

@@ -265,3 +265,35 @@ impl Lexer {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn recognizes_decimal_numbers() {
+        let mut lexer = Lexer::new("let pi = 3.14;");
+
+        assert!(matches!(lexer.next_token(), Token::KeyWord(ref keyword) if keyword == "let"));
+        assert!(matches!(lexer.next_token(), Token::Identifier(ref ident) if ident == "pi"));
+        assert!(matches!(lexer.next_token(), Token::Operator(ref op) if op == "="));
+        assert!(matches!(lexer.next_token(), Token::Number(ref value) if value == "3.14"));
+    }
+
+    #[test]
+    fn recognizes_strings_and_chars() {
+        let mut lexer = Lexer::new(r#""hola" 'x'"#);
+
+        assert!(matches!(lexer.next_token(), Token::StringLiteral(ref value) if value == "hola"));
+        assert!(matches!(lexer.next_token(), Token::CharLiteral('x')));
+    }
+
+    #[test]
+    fn recognizes_extra_reserved_words() {
+        let mut lexer = Lexer::new("for true false");
+
+        assert!(matches!(lexer.next_token(), Token::KeyWord(ref keyword) if keyword == "for"));
+        assert!(matches!(lexer.next_token(), Token::KeyWord(ref keyword) if keyword == "true"));
+        assert!(matches!(lexer.next_token(), Token::KeyWord(ref keyword) if keyword == "false"));
+    }
+}
