@@ -33,6 +33,8 @@ pub enum Statement {
         condition: Expression,
     },
     Return(Option<Expression>),
+    Break,
+    Continue,
     Block(Vec<Statement>),
 }
 
@@ -126,6 +128,12 @@ impl Statement {
                     expr.print(indent + 1);
                 }
             }
+            Statement::Break => {
+                println!("{}Break", padding);
+            }
+            Statement::Continue => {
+                println!("{}Continue", padding);
+            }
             Statement::Block(statements) => {
                 println!("{}Block", padding);
                 for statement in statements {
@@ -213,6 +221,8 @@ impl Parser {
             Token::KeyWord(ref kw) if kw == "while" => self.parse_while_statement(),
             Token::KeyWord(ref kw) if kw == "do" => self.parse_do_while_statement(),
             Token::KeyWord(ref kw) if kw == "return" => self.parse_return_statement(),
+            Token::KeyWord(ref kw) if kw == "break" => self.parse_break_statement(),
+            Token::KeyWord(ref kw) if kw == "continue" => self.parse_continue_statement(),
             Token::KeyWord(ref kw) if ["int", "double", "char", "void", "let"].contains(&kw.as_str()) => {
                 self.parse_declaration_statement()
             }
@@ -286,6 +296,18 @@ impl Parser {
         };
         self.expect_punctuation(';');
         Some(Statement::Return(value))
+    }
+
+    fn parse_break_statement(&mut self) -> Option<Statement> {
+        self.next_token();
+        self.expect_punctuation(';');
+        Some(Statement::Break)
+    }
+
+    fn parse_continue_statement(&mut self) -> Option<Statement> {
+        self.next_token();
+        self.expect_punctuation(';');
+        Some(Statement::Continue)
     }
 
     fn parse_block_statement(&mut self) -> Option<Statement> {
