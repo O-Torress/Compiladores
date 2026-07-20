@@ -1,5 +1,11 @@
 use analizador_lexico::tokens::{Token, TokenInfo};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Span {
+    pub line: usize,
+    pub column: usize,
+}
+
 #[derive(Debug, Clone)]
 pub struct Program {
     pub statements: Vec<Statement>,
@@ -17,25 +23,49 @@ pub enum Statement {
         kind: DeclarationKind,
         name: String,
         value: Option<Expression>,
+        span: Span,
     },
-    Expression(Expression),
+    Expression {
+        expr: Expression,
+        span: Span,
+    },
     If {
         condition: Expression,
         consequence: Box<Statement>,
         alternative: Option<Box<Statement>>,
+        span: Span,
     },
     While {
         condition: Expression,
         body: Box<Statement>,
+        span: Span,
     },
     DoWhile {
         body: Box<Statement>,
         condition: Expression,
+        span: Span,
     },
-    Return(Option<Expression>),
-    Break,
-    Continue,
-    Block(Vec<Statement>),
+    Return {
+        value: Option<Expression>,
+        span: Span,
+    },
+    Break {
+        span: Span,
+    },
+    Continue {
+        span: Span,
+    },
+    Block {
+        statements: Vec<Statement>,
+        span: Span,
+    },
+    FunctionDefinition {
+        name: String,
+        return_type: String,
+        parameters: Vec<(String, String)>,
+        body: Box<Statement>,
+        span: Span,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -44,22 +74,31 @@ pub enum Expression {
         target: String,
         operator: String,
         value: Box<Expression>,
+        span: Span,
     },
     Binary {
         operator: String,
         left: Box<Expression>,
         right: Box<Expression>,
+        span: Span,
     },
     Unary {
         operator: String,
         operand: Box<Expression>,
+        span: Span,
     },
     Call {
         name: String,
         arguments: Vec<Expression>,
+        span: Span,
     },
-    Identifier(String),
-    Literal(Literal),
+    Index {
+        base: Box<Expression>,
+        index: Box<Expression>,
+        span: Span,
+    },
+    Identifier(String, Span),
+    Literal(Literal, Span),
 }
 
 #[derive(Debug, Clone)]
@@ -67,6 +106,20 @@ pub enum Literal {
     Number(String),
     String(String),
     Char(char),
+}
+
+impl Expression {
+    pub fn span(&self) -> Span {
+        match self {
+            Expression::Assignment { span, .. }
+            | Expression::Binary { span, .. }
+            | Expression::Unary { span, .. }
+            | Expression::Call { span, .. }
+            | Expression::Index { span, .. }
+            | Expression::Identifier(_, span)
+            | Expression::Literal(_, span) => *span,
+        }
+    }
 }
 
 impl Program {
@@ -82,7 +135,7 @@ impl Statement {
     fn print(&self, indent: usize) {
         let padding = "  ".repeat(indent);
         match self {
-            Statement::Declaration { kind, name, value } => {
+            Statement::Declaration { kind, name, value, .. } => {
                 let kind_label = match kind {
                     DeclarationKind::Typed(k) => format!("Declaration ({}) {}", k, name),
                     DeclarationKind::Let => format!("Declaration (let) {}", name),
@@ -93,11 +146,11 @@ impl Statement {
                     value.print(indent + 2);
                 }
             }
-            Statement::Expression(expr) => {
+            Statement::Expression { expr, .. } => {
                 println!("{}Expression", padding);
                 expr.print(indent + 1);
             }
-            Statement::If { condition, consequence, alternative } => {
+            Statement::If { condition, consequence, alternative, .. } => {
                 println!("{}If", padding);
                 println!("{}  +-- Condition", padding);
                 condition.print(indent + 2);
@@ -108,37 +161,40 @@ impl Statement {
                     alternative.print(indent + 2);
                 }
             }
-            Statement::While { condition, body } => {
+            Statement::While { condition, body, .. } => {
                 println!("{}While", padding);
                 println!("{}  +-- Condition", padding);
                 condition.print(indent + 2);
                 println!("{}  +-- Body", padding);
                 body.print(indent + 2);
             }
-            Statement::DoWhile { body, condition } => {
+            Statement::DoWhile { body, condition, .. } => {
                 println!("{}DoWhile", padding);
                 println!("{}  +-- Body", padding);
                 body.print(indent + 2);
                 println!("{}  +-- Condition", padding);
                 condition.print(indent + 2);
             }
-            Statement::Return(expr) => {
+            Statement::Return { value, .. } => {
                 println!("{}Return", padding);
-                if let Some(expr) = expr {
+                if let Some(expr) = value {
                     expr.print(indent + 1);
                 }
             }
-            Statement::Break => {
-                println!("{}Break", padding);
-            }
-            Statement::Continue => {
-                println!("{}Continue", padding);
-            }
-            Statement::Block(statements) => {
+            Statement::Break { .. } => println!("{}Break", padding),
+            Statement::Continue { .. } => println!("{}Continue", padding),
+            Statement::Block { statements, .. } => {
                 println!("{}Block", padding);
                 for statement in statements {
                     statement.print(indent + 1);
                 }
+            }
+            Statement::FunctionDefinition { name, parameters, body, .. } => {
+                println!("{}Function {}", padding, name);
+                for (param_name, param_type) in parameters {
+                    println!("{}  +-- Param {}: {}", padding, param_name, param_type);
+                }
+                body.print(indent + 1);
             }
         }
     }
@@ -148,33 +204,34 @@ impl Expression {
     fn print(&self, indent: usize) {
         let padding = "  ".repeat(indent);
         match self {
-            Expression::Assignment { target, operator, value } => {
+            Expression::Assignment { target, operator, value, .. } => {
                 println!("{}Assignment ({})", padding, operator);
                 println!("{}  +-- Target: {}", padding, target);
                 println!("{}  +-- Value", padding);
                 value.print(indent + 2);
             }
-            Expression::Binary { operator, left, right } => {
+            Expression::Binary { operator, left, right, .. } => {
                 println!("{}Binary ({})", padding, operator);
                 left.print(indent + 1);
                 right.print(indent + 1);
             }
-            Expression::Unary { operator, operand } => {
+            Expression::Unary { operator, operand, .. } => {
                 println!("{}Unary ({})", padding, operator);
                 operand.print(indent + 1);
             }
-            Expression::Call { name, arguments } => {
+            Expression::Call { name, arguments, .. } => {
                 println!("{}Call ({})", padding, name);
                 for argument in arguments {
                     argument.print(indent + 1);
                 }
             }
-            Expression::Identifier(name) => {
-                println!("{}Identifier ({})", padding, name);
+            Expression::Index { base, index, .. } => {
+                println!("{}Index", padding);
+                base.print(indent + 1);
+                index.print(indent + 1);
             }
-            Expression::Literal(literal) => {
-                println!("{}Literal ({})", padding, literal);
-            }
+            Expression::Identifier(name, _) => println!("{}Identifier ({})", padding, name),
+            Expression::Literal(literal, _) => println!("{}Literal ({})", padding, literal),
         }
     }
 }
@@ -224,7 +281,11 @@ impl Parser {
             Token::KeyWord(ref kw) if kw == "break" => self.parse_break_statement(),
             Token::KeyWord(ref kw) if kw == "continue" => self.parse_continue_statement(),
             Token::KeyWord(ref kw) if ["int", "double", "char", "void", "let"].contains(&kw.as_str()) => {
-                self.parse_declaration_statement()
+                if self.peek_delimiter('(') {
+                    self.parse_function_definition()
+                } else {
+                    self.parse_declaration_statement()
+                }
             }
             Token::Delimiter('{') => self.parse_block_statement(),
             _ => self.parse_expression_statement(),
@@ -232,6 +293,7 @@ impl Parser {
     }
 
     fn parse_declaration_statement(&mut self) -> Option<Statement> {
+        let span = self.current_span();
         let kind = match &self.current_token().token {
             Token::KeyWord(kw) if kw == "let" => DeclarationKind::Let,
             Token::KeyWord(kw) => DeclarationKind::Typed(kw.clone()),
@@ -240,6 +302,7 @@ impl Parser {
 
         self.next_token();
         let name = self.parse_identifier()?;
+        self.parse_array_suffix();
         let value = if self.current_token_is_operator("=") {
             self.next_token();
             Some(self.parse_expression()?)
@@ -248,10 +311,60 @@ impl Parser {
         };
 
         self.expect_punctuation(';');
-        Some(Statement::Declaration { kind, name, value })
+        Some(Statement::Declaration { kind, name, value, span })
+    }
+
+    fn parse_function_definition(&mut self) -> Option<Statement> {
+        let span = self.current_span();
+        let return_type = match &self.current_token().token {
+            Token::KeyWord(kw) => kw.clone(),
+            _ => return None,
+        };
+
+        self.next_token();
+        let name = self.parse_identifier()?;
+        self.expect_delimiter('(')?;
+        let parameters = self.parse_parameter_list();
+        self.expect_delimiter(')')?;
+        let body = Box::new(self.parse_statement()?);
+
+        Some(Statement::FunctionDefinition { name, return_type, parameters, body, span })
+    }
+
+    fn parse_parameter_list(&mut self) -> Vec<(String, String)> {
+        let mut parameters = Vec::new();
+        if self.current_token_is_delimiter(')') {
+            return parameters;
+        }
+
+        while !self.current_token_is_delimiter(')') && !self.current_token_is_eof() {
+            let param_type = match &self.current_token().token {
+                Token::KeyWord(kw) if ["int", "double", "char", "void"].contains(&kw.as_str()) => {
+                    let ty = kw.clone();
+                    self.next_token();
+                    ty
+                }
+                _ => break,
+            };
+
+            let name = match self.parse_identifier() {
+                Some(name) => name,
+                None => break,
+            };
+            parameters.push((name, param_type));
+
+            if self.current_token_is_punctuation(',') {
+                self.next_token();
+            } else {
+                break;
+            }
+        }
+
+        parameters
     }
 
     fn parse_if_statement(&mut self) -> Option<Statement> {
+        let span = self.current_span();
         self.next_token();
         self.expect_delimiter('(')?;
         let condition = self.parse_expression()?;
@@ -264,19 +377,21 @@ impl Parser {
             None
         };
 
-        Some(Statement::If { condition, consequence, alternative })
+        Some(Statement::If { condition, consequence, alternative, span })
     }
 
     fn parse_while_statement(&mut self) -> Option<Statement> {
+        let span = self.current_span();
         self.next_token();
         self.expect_delimiter('(')?;
         let condition = self.parse_expression()?;
         self.expect_delimiter(')')?;
         let body = Box::new(self.parse_statement()?);
-        Some(Statement::While { condition, body })
+        Some(Statement::While { condition, body, span })
     }
 
     fn parse_do_while_statement(&mut self) -> Option<Statement> {
+        let span = self.current_span();
         self.next_token();
         let body = Box::new(self.parse_statement()?);
         self.expect_keyword("while")?;
@@ -284,10 +399,11 @@ impl Parser {
         let condition = self.parse_expression()?;
         self.expect_delimiter(')')?;
         self.expect_punctuation(';');
-        Some(Statement::DoWhile { body, condition })
+        Some(Statement::DoWhile { body, condition, span })
     }
 
     fn parse_return_statement(&mut self) -> Option<Statement> {
+        let span = self.current_span();
         self.next_token();
         let value = if self.current_token_is_punctuation(';') {
             None
@@ -295,22 +411,25 @@ impl Parser {
             Some(self.parse_expression()?)
         };
         self.expect_punctuation(';');
-        Some(Statement::Return(value))
+        Some(Statement::Return { value, span })
     }
 
     fn parse_break_statement(&mut self) -> Option<Statement> {
+        let span = self.current_span();
         self.next_token();
         self.expect_punctuation(';');
-        Some(Statement::Break)
+        Some(Statement::Break { span })
     }
 
     fn parse_continue_statement(&mut self) -> Option<Statement> {
+        let span = self.current_span();
         self.next_token();
         self.expect_punctuation(';');
-        Some(Statement::Continue)
+        Some(Statement::Continue { span })
     }
 
     fn parse_block_statement(&mut self) -> Option<Statement> {
+        let span = self.current_span();
         self.expect_delimiter('{')?;
         let mut statements = Vec::new();
         while !self.current_token_is_delimiter('}') && !self.current_token_is_eof() {
@@ -321,7 +440,7 @@ impl Parser {
             }
         }
         self.expect_delimiter('}')?;
-        Some(Statement::Block(statements))
+        Some(Statement::Block { statements, span })
     }
 
     fn parse_expression_statement(&mut self) -> Option<Statement> {
@@ -330,9 +449,10 @@ impl Parser {
             return None;
         }
 
-        let expression = self.parse_expression()?;
+        let span = self.current_span();
+        let expr = self.parse_expression()?;
         self.expect_punctuation(';');
-        Some(Statement::Expression(expression))
+        Some(Statement::Expression { expr, span })
     }
 
     fn parse_expression(&mut self) -> Option<Expression> {
@@ -343,19 +463,22 @@ impl Parser {
         let left = self.parse_logical_or()?;
         if let Token::Operator(op) = &self.current_token().token {
             if ["=", "+=", "-=", "*=", "/=", "%="].contains(&op.as_str()) {
+                let span = left.span();
                 let operator = op.clone();
                 self.next_token();
                 let right = self.parse_assignment()?;
                 return match left {
-                    Expression::Identifier(target) => Some(Expression::Assignment {
+                    Expression::Identifier(target, _) => Some(Expression::Assignment {
                         target,
                         operator,
                         value: Box::new(right),
+                        span,
                     }),
                     _ => Some(Expression::Binary {
                         operator,
                         left: Box::new(left),
                         right: Box::new(right),
+                        span,
                     }),
                 };
             }
@@ -368,10 +491,12 @@ impl Parser {
         while self.current_token_is_operator("||") {
             let operator = self.consume_operator().unwrap();
             let right = self.parse_logical_and()?;
+            let span = left.span();
             left = Expression::Binary {
                 operator,
                 left: Box::new(left),
                 right: Box::new(right),
+                span,
             };
         }
         Some(left)
@@ -382,10 +507,12 @@ impl Parser {
         while self.current_token_is_operator("&&") {
             let operator = self.consume_operator().unwrap();
             let right = self.parse_equality()?;
+            let span = left.span();
             left = Expression::Binary {
                 operator,
                 left: Box::new(left),
                 right: Box::new(right),
+                span,
             };
         }
         Some(left)
@@ -396,10 +523,12 @@ impl Parser {
         while self.current_token_is_operator("==") || self.current_token_is_operator("!=") {
             let operator = self.consume_operator().unwrap();
             let right = self.parse_relational()?;
+            let span = left.span();
             left = Expression::Binary {
                 operator,
                 left: Box::new(left),
                 right: Box::new(right),
+                span,
             };
         }
         Some(left)
@@ -410,10 +539,12 @@ impl Parser {
         while ["<", ">", "<=", ">="].iter().any(|op| self.current_token_is_operator(op)) {
             let operator = self.consume_operator().unwrap();
             let right = self.parse_additive()?;
+            let span = left.span();
             left = Expression::Binary {
                 operator,
                 left: Box::new(left),
                 right: Box::new(right),
+                span,
             };
         }
         Some(left)
@@ -424,10 +555,12 @@ impl Parser {
         while self.current_token_is_operator("+") || self.current_token_is_operator("-") {
             let operator = self.consume_operator().unwrap();
             let right = self.parse_multiplicative()?;
+            let span = left.span();
             left = Expression::Binary {
                 operator,
                 left: Box::new(left),
                 right: Box::new(right),
+                span,
             };
         }
         Some(left)
@@ -438,10 +571,12 @@ impl Parser {
         while ["*", "/", "%"].iter().any(|op| self.current_token_is_operator(op)) {
             let operator = self.consume_operator().unwrap();
             let right = self.parse_unary()?;
+            let span = left.span();
             left = Expression::Binary {
                 operator,
                 left: Box::new(left),
                 right: Box::new(right),
+                span,
             };
         }
         Some(left)
@@ -449,14 +584,12 @@ impl Parser {
 
     fn parse_unary(&mut self) -> Option<Expression> {
         if let Token::Operator(op) = &self.current_token().token {
-            if ["-", "+", "!", "++", "--"].contains(&op.as_str()) {
+            if ["-", "+", "!", "&", "++", "--"].contains(&op.as_str()) {
+                let span = self.current_span();
                 let operator = op.clone();
                 self.next_token();
                 let operand = self.parse_unary()?;
-                return Some(Expression::Unary {
-                    operator,
-                    operand: Box::new(operand),
-                });
+                return Some(Expression::Unary { operator, operand: Box::new(operand), span });
             }
         }
         self.parse_primary()
@@ -465,32 +598,44 @@ impl Parser {
     fn parse_primary(&mut self) -> Option<Expression> {
         match &self.current_token().token {
             Token::Identifier(name) => {
+                let span = self.current_span();
                 let name = name.clone();
-                if self.peek_delimiter('(') {
+                self.next_token();
+
+                let mut expr = Expression::Identifier(name, span);
+                while self.current_token_is_delimiter('[') {
                     self.next_token();
-                    self.next_token();
-                    let arguments = self.parse_call_arguments();
-                    self.expect_delimiter(')')?;
-                    Some(Expression::Call { name, arguments })
-                } else {
-                    self.next_token();
-                    Some(Expression::Identifier(name))
+                    let index = self.parse_expression()?;
+                    self.expect_delimiter(']')?;
+                    let current_span = self.current_span();
+                    expr = Expression::Index { base: Box::new(expr), index: Box::new(index), span: current_span };
                 }
+
+                if self.peek_delimiter('(') {
+                    let arguments = self.parse_call_arguments();
+                    let span = self.current_span();
+                    expr = Expression::Call { name: match &expr { Expression::Identifier(name, _) => name.clone(), _ => String::new() }, arguments, span };
+                }
+
+                Some(expr)
             }
             Token::Number(value) => {
+                let span = self.current_span();
                 let value = value.clone();
                 self.next_token();
-                Some(Expression::Literal(Literal::Number(value)))
+                Some(Expression::Literal(Literal::Number(value), span))
             }
             Token::StringLiteral(value) => {
+                let span = self.current_span();
                 let value = value.clone();
                 self.next_token();
-                Some(Expression::Literal(Literal::String(value)))
+                Some(Expression::Literal(Literal::String(value), span))
             }
             Token::CharLiteral(value) => {
+                let span = self.current_span();
                 let value = *value;
                 self.next_token();
-                Some(Expression::Literal(Literal::Char(value)))
+                Some(Expression::Literal(Literal::Char(value), span))
             }
             Token::Delimiter('(') => {
                 self.next_token();
@@ -533,6 +678,16 @@ impl Parser {
                 Some(name)
             }
             _ => None,
+        }
+    }
+
+    fn parse_array_suffix(&mut self) {
+        while self.current_token_is_delimiter('[') {
+            self.next_token();
+            if !self.current_token_is_delimiter(']') {
+                let _ = self.parse_expression();
+            }
+            self.expect_delimiter(']');
         }
     }
 
@@ -589,6 +744,11 @@ impl Parser {
         if self.position + 1 < self.tokens.len() {
             self.position += 1;
         }
+    }
+
+    fn current_span(&self) -> Span {
+        let token = self.current_token();
+        Span { line: token.line, column: token.column }
     }
 
     fn current_token_is_eof(&self) -> bool {

@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use analizador_lexico::lexer::Lexer;
-use analizador_sintactico::parser::{Expression, Literal, Program, Statement, DeclarationKind};
+use analizador_sintactico::parser::{DeclarationKind, Expression, Literal, Program, Span, Statement};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum PrimitiveType {
@@ -78,21 +78,21 @@ impl SemanticAnalyzer {
 
     fn analyze_statement(&mut self, statement: &Statement) {
         match statement {
-            Statement::Declaration { kind, name, value } => {
+            Statement::Declaration { kind, name, value, span } => {
                 let declared_type = match kind {
                     DeclarationKind::Typed(ty) => self.parse_type(ty),
                     DeclarationKind::Let => PrimitiveType::Unknown,
                 };
 
                 if self.current_scope().contains_key(name) {
-                    self.error(format!("La variable '{}' ya está declarada en este ámbito", name), 1, 1);
+                    self.error(format!("La variable '{}' ya está declarada en este ámbito", name), span.line, span.column);
                 } else {
                     let symbol = Symbol {
                         name: name.clone(),
                         kind: SymbolKind::Variable,
                         ty: declared_type.clone(),
-                        line: 1,
-                        column: 1,
+                        line: span.line,
+                        column: span.column,
                     };
                     self.current_scope_mut().insert(name.clone(), symbol);
                 }
@@ -101,16 +101,16 @@ impl SemanticAnalyzer {
                     let inferred = self.infer_expression_type(value_expr);
                     if declared_type != PrimitiveType::Unknown && inferred != PrimitiveType::Unknown {
                         if !self.types_are_compatible(&declared_type, &inferred) {
-                            self.error(format!("No se puede asignar un valor de tipo {:?} a '{}' de tipo {:?}", inferred, name, declared_type), 1, 1);
+                            self.error(format!("No se puede asignar un valor de tipo {:?} a '{}' de tipo {:?}", inferred, name, declared_type), span.line, span.column);
                         }
                     }
                 }
             }
-            Statement::Expression(expr) => {
-                self.analyze_expression(expr);
+            Statement::Expression { expr, span } => {
+                self.analyze_expression_at(expr, *span);
             }
-            Statement::If { condition, consequence, alternative } => {
-                self.ensure_boolean_condition(condition);
+            Statement::If { condition, consequence, alternative, span } => {
+                self.ensure_boolean_condition_at(condition, *span);
                 self.enter_scope();
                 self.analyze_statement(consequence);
                 self.leave_scope();
@@ -121,67 +121,90 @@ impl SemanticAnalyzer {
                     self.leave_scope();
                 }
             }
-            Statement::While { condition, body } => {
-                self.ensure_boolean_condition(condition);
+            Statement::While { condition, body, span } => {
+                self.ensure_boolean_condition_at(condition, *span);
                 self.loop_depth += 1;
                 self.analyze_statement(body);
                 self.loop_depth -= 1;
             }
-            Statement::DoWhile { body, condition } => {
+            Statement::DoWhile { body, condition, span } => {
                 self.loop_depth += 1;
                 self.analyze_statement(body);
                 self.loop_depth -= 1;
-                self.ensure_boolean_condition(condition);
+                self.ensure_boolean_condition_at(condition, *span);
             }
-            Statement::Return(expr) => {
-                let expr_type = expr.as_ref().map(|e| self.infer_expression_type(e)).unwrap_or(PrimitiveType::Void);
+            Statement::Return { value, span } => {
+                let expr_type = value.as_ref().map(|e| self.infer_expression_type(e)).unwrap_or(PrimitiveType::Void);
                 if let Some(current_function) = &self.current_function {
                     if !self.types_are_compatible(&current_function.return_type, &expr_type) {
-                        self.error(format!("El retorno no coincide con el tipo esperado {:?}", current_function.return_type), 1, 1);
+                        self.error(format!("El retorno no coincide con el tipo esperado {:?}", current_function.return_type), span.line, span.column);
                     }
                 }
             }
-            Statement::Break => {
+            Statement::Break { span } => {
                 if self.loop_depth == 0 {
-                    self.error("'break' solo puede usarse dentro de un bucle".to_string(), 1, 1);
+                    self.error("'break' solo puede usarse dentro de un bucle".to_string(), span.line, span.column);
                 }
             }
-            Statement::Continue => {
+            Statement::Continue { span } => {
                 if self.loop_depth == 0 {
-                    self.error("'continue' solo puede usarse dentro de un bucle".to_string(), 1, 1);
+                    self.error("'continue' solo puede usarse dentro de un bucle".to_string(), span.line, span.column);
                 }
             }
-            Statement::Block(statements) => {
+            Statement::Block { statements, span } => {
                 self.enter_scope();
                 for stmt in statements {
                     self.analyze_statement(stmt);
                 }
                 self.leave_scope();
             }
+            Statement::FunctionDefinition { name, return_type, body, span, .. } => {
+                let signature = FunctionSignature {
+                    name: name.clone(),
+                    return_type: self.parse_type(return_type),
+                    parameters: Vec::new(),
+                };
+                self.functions.insert(name.clone(), signature.clone());
+                let previous_function = self.current_function.clone();
+                self.current_function = Some(signature);
+                self.enter_scope();
+                self.analyze_statement(body);
+                self.leave_scope();
+                self.current_function = previous_function;
+            }
         }
     }
 
     fn analyze_expression(&mut self, expr: &Expression) -> PrimitiveType {
+        self.analyze_expression_at(expr, expr.span())
+    }
+
+    fn analyze_expression_at(&mut self, expr: &Expression, span: Span) -> PrimitiveType {
         match expr {
             Expression::Assignment { target, value, .. } => {
-                let target_type = self.lookup_variable_type(target);
-                let value_type = self.analyze_expression(value);
+                let target_type = self.lookup_variable_type_at(target, span);
+                let value_type = self.analyze_expression_at(value, value.span());
                 if !self.types_are_compatible(&target_type, &value_type) {
-                    self.error(format!("No se puede asignar un valor de tipo {:?} a '{}'", value_type, target), 1, 1);
+                    self.error(format!("No se puede asignar un valor de tipo {:?} a '{}'", value_type, target), span.line, span.column);
                 }
                 target_type
             }
-            Expression::Binary { operator, left, right } => {
-                let left_type = self.analyze_expression(left);
-                let right_type = self.analyze_expression(right);
-                self.check_binary_operation(operator, &left_type, &right_type)
+            Expression::Binary { operator, left, right, .. } => {
+                let left_type = self.analyze_expression_at(left, left.span());
+                let right_type = self.analyze_expression_at(right, right.span());
+                self.check_binary_operation_at(operator, &left_type, &right_type, span)
             }
-            Expression::Unary { operator: _, operand } => self.analyze_expression(operand),
-            Expression::Call { name, arguments } => {
-                self.validate_function_call(name, arguments)
+            Expression::Unary { operand, .. } => self.analyze_expression_at(operand, operand.span()),
+            Expression::Call { name, arguments, span: call_span } => {
+                self.validate_function_call_at(name, arguments, *call_span)
             }
-            Expression::Identifier(name) => self.lookup_variable_type(name),
-            Expression::Literal(lit) => self.literal_type(lit),
+            Expression::Identifier(name, identifier_span) => self.lookup_variable_type_at(name, *identifier_span),
+            Expression::Literal(lit, _) => self.literal_type(lit),
+            Expression::Index { base, index, .. } => {
+                let _ = self.analyze_expression_at(base, base.span());
+                let _ = self.analyze_expression_at(index, index.span());
+                PrimitiveType::Unknown
+            }
         }
     }
 
@@ -190,12 +213,16 @@ impl SemanticAnalyzer {
     }
 
     fn validate_function_call(&mut self, name: &str, arguments: &[Expression]) -> PrimitiveType {
+        self.validate_function_call_at(name, arguments, Span { line: 1, column: 1 })
+    }
+
+    fn validate_function_call_at(&mut self, name: &str, arguments: &[Expression], span: Span) -> PrimitiveType {
         if let Some(signature) = self.functions.get(name).cloned() {
             if signature.parameters.len() != arguments.len() {
                 self.error(
                     format!("La función '{}' espera {} argumentos, recibió {}", name, signature.parameters.len(), arguments.len()),
-                    1,
-                    1,
+                    span.line,
+                    span.column,
                 );
                 return signature.return_type.clone();
             }
@@ -206,26 +233,30 @@ impl SemanticAnalyzer {
                 if !self.types_are_compatible(expected_type, &arg_type) {
                     self.error(
                         format!("El argumento {} de '{}' no coincide con el tipo esperado {:?}", index + 1, name, expected_type),
-                        1,
-                        1,
+                        span.line,
+                        span.column,
                     );
                 }
             }
 
             signature.return_type.clone()
         } else {
-            self.error(format!("La función '{}' no está definida", name), 1, 1);
+            self.error(format!("La función '{}' no está definida", name), span.line, span.column);
             PrimitiveType::Unknown
         }
     }
 
     fn check_binary_operation(&mut self, operator: &str, left: &PrimitiveType, right: &PrimitiveType) -> PrimitiveType {
+        self.check_binary_operation_at(operator, left, right, Span { line: 1, column: 1 })
+    }
+
+    fn check_binary_operation_at(&mut self, operator: &str, left: &PrimitiveType, right: &PrimitiveType, span: Span) -> PrimitiveType {
         match operator {
             "+" | "-" | "*" | "/" | "%" => {
                 if left == right {
                     left.clone()
                 } else {
-                    self.error(format!("La operación '{}' no es válida para tipos {:?} y {:?}", operator, left, right), 1, 1);
+                    self.error(format!("La operación '{}' no es válida para tipos {:?} y {:?}", operator, left, right), span.line, span.column);
                     PrimitiveType::Unknown
                 }
             }
@@ -233,7 +264,7 @@ impl SemanticAnalyzer {
                 if left == right {
                     PrimitiveType::Bool
                 } else {
-                    self.error(format!("La comparación '{}' no es válida para tipos {:?} y {:?}", operator, left, right), 1, 1);
+                    self.error(format!("La comparación '{}' no es válida para tipos {:?} y {:?}", operator, left, right), span.line, span.column);
                     PrimitiveType::Bool
                 }
             }
@@ -241,7 +272,7 @@ impl SemanticAnalyzer {
                 if left == &PrimitiveType::Bool && right == &PrimitiveType::Bool {
                     PrimitiveType::Bool
                 } else {
-                    self.error(format!("La operación lógica '{}' requiere booleanos", operator), 1, 1);
+                    self.error(format!("La operación lógica '{}' requiere booleanos", operator), span.line, span.column);
                     PrimitiveType::Bool
                 }
             }
@@ -250,19 +281,27 @@ impl SemanticAnalyzer {
     }
 
     fn ensure_boolean_condition(&mut self, expr: &Expression) {
-        let ty = self.analyze_expression(expr);
+        self.ensure_boolean_condition_at(expr, Span { line: 1, column: 1 })
+    }
+
+    fn ensure_boolean_condition_at(&mut self, expr: &Expression, span: Span) {
+        let ty = self.analyze_expression_at(expr, span);
         if ty != PrimitiveType::Bool {
-            self.error("La condición debe evaluar a un valor booleano".to_string(), 1, 1);
+            self.error("La condición debe evaluar a un valor booleano".to_string(), span.line, span.column);
         }
     }
 
     fn lookup_variable_type(&mut self, name: &str) -> PrimitiveType {
+        self.lookup_variable_type_at(name, Span { line: 1, column: 1 })
+    }
+
+    fn lookup_variable_type_at(&mut self, name: &str, span: Span) -> PrimitiveType {
         for scope in self.scopes.iter().rev() {
             if let Some(symbol) = scope.get(name) {
                 return symbol.ty.clone();
             }
         }
-        self.error(format!("La variable '{}' no está declarada", name), 1, 1);
+        self.error(format!("La variable '{}' no está declarada", name), span.line, span.column);
         PrimitiveType::Unknown
     }
 
@@ -304,6 +343,22 @@ impl SemanticAnalyzer {
                 name: "printf".to_string(),
                 return_type: PrimitiveType::Int,
                 parameters: vec![("format".to_string(), PrimitiveType::String)],
+            },
+        );
+        self.functions.insert(
+            "scanf".to_string(),
+            FunctionSignature {
+                name: "scanf".to_string(),
+                return_type: PrimitiveType::Int,
+                parameters: vec![("format".to_string(), PrimitiveType::String)],
+            },
+        );
+        self.functions.insert(
+            "fmod".to_string(),
+            FunctionSignature {
+                name: "fmod".to_string(),
+                return_type: PrimitiveType::Double,
+                parameters: vec![("x".to_string(), PrimitiveType::Double), ("y".to_string(), PrimitiveType::Double)],
             },
         );
     }
@@ -387,5 +442,19 @@ mod tests {
 
         let result = analyze_code(input).unwrap_err();
         assert!(!result.is_empty());
+    }
+
+    #[test]
+    fn reports_error_location_for_undeclared_variable() {
+        let input = r#"
+            int main() {
+                int x = y;
+                return x;
+            }
+        "#;
+
+        let errors = analyze_code(input).unwrap_err();
+        let error = errors.first().unwrap();
+        assert!(error.line > 1 || error.column > 1);
     }
 }
