@@ -158,7 +158,7 @@ impl SemanticAnalyzer {
                 }
                 self.leave_scope();
             }
-            Statement::FunctionDefinition { name, return_type, body, span, .. } => {
+            Statement::FunctionDefinition { name, return_type, body, .. } => {
                 let signature = FunctionSignature {
                     name: name.clone(),
                     return_type: self.parse_type(return_type),
@@ -212,10 +212,6 @@ impl SemanticAnalyzer {
         self.analyze_expression(expr)
     }
 
-    fn validate_function_call(&mut self, name: &str, arguments: &[Expression]) -> PrimitiveType {
-        self.validate_function_call_at(name, arguments, Span { line: 1, column: 1 })
-    }
-
     fn validate_function_call_at(&mut self, name: &str, arguments: &[Expression], span: Span) -> PrimitiveType {
         if let Some(signature) = self.functions.get(name).cloned() {
             if signature.parameters.len() != arguments.len() {
@@ -246,9 +242,6 @@ impl SemanticAnalyzer {
         }
     }
 
-    fn check_binary_operation(&mut self, operator: &str, left: &PrimitiveType, right: &PrimitiveType) -> PrimitiveType {
-        self.check_binary_operation_at(operator, left, right, Span { line: 1, column: 1 })
-    }
 
     fn check_binary_operation_at(&mut self, operator: &str, left: &PrimitiveType, right: &PrimitiveType, span: Span) -> PrimitiveType {
         match operator {
@@ -280,19 +273,12 @@ impl SemanticAnalyzer {
         }
     }
 
-    fn ensure_boolean_condition(&mut self, expr: &Expression) {
-        self.ensure_boolean_condition_at(expr, Span { line: 1, column: 1 })
-    }
 
     fn ensure_boolean_condition_at(&mut self, expr: &Expression, span: Span) {
         let ty = self.analyze_expression_at(expr, span);
         if ty != PrimitiveType::Bool {
             self.error("La condición debe evaluar a un valor booleano".to_string(), span.line, span.column);
         }
-    }
-
-    fn lookup_variable_type(&mut self, name: &str) -> PrimitiveType {
-        self.lookup_variable_type_at(name, Span { line: 1, column: 1 })
     }
 
     fn lookup_variable_type_at(&mut self, name: &str, span: Span) -> PrimitiveType {
