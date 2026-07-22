@@ -1,6 +1,9 @@
 use std::{env, fs};
 
-use analizador_semantico::analyze_code;
+use analizador_lexico::lexer::Lexer;
+use analizador_lexico::tokens::Token;
+use analizador_semantico::analyze_program;
+use analizador_sintactico::Parser;
 
 fn main() {
     let args: Vec<String> = env::args().collect();
@@ -16,7 +19,25 @@ fn main() {
         std::process::exit(2);
     });
 
-    match analyze_code(&input) {
+    let mut lexer = Lexer::new(&input);
+    let mut tokens = Vec::new();
+
+    loop {
+        let token = lexer.next_token_with_position();
+        tokens.push(token.clone());
+        if matches!(token.token, Token::EOF) {
+            break;
+        }
+    }
+
+    let mut parser = Parser::new(tokens);
+    let program = parser.parse_program();
+
+    println!("--- Árbol Sintáctico ---");
+    program.print();
+
+    println!("\n--- Análisis Semántico ---");
+    match analyze_program(&program) {
         Ok(()) => println!("Análisis semántico correcto"),
         Err(errors) => {
             println!("Errores semánticos detectados:");

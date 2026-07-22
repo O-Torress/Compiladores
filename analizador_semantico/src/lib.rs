@@ -1,3 +1,12 @@
 pub mod semantic;
 
-pub use semantic::{SemanticAnalyzer, SemanticError, PrimitiveType, Symbol, SymbolKind, FunctionSignature, analyze_code};
+pub use semantic::{
+    analyze_code,
+    analyze_program,
+    FunctionSignature,
+    PrimitiveType,
+    SemanticAnalyzer,
+    SemanticError,
+    Symbol,
+    SymbolKind,
+};

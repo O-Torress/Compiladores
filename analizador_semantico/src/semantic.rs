@@ -397,13 +397,44 @@ pub fn analyze_code(input: &str) -> Result<(), Vec<SemanticError>> {
 
     let mut parser = analizador_sintactico::parser::Parser::new(tokens);
     let program = parser.parse_program();
+    analyze_program(&program)
+}
+
+pub fn analyze_program(program: &Program) -> Result<(), Vec<SemanticError>> {
     let mut analyzer = SemanticAnalyzer::new();
-    analyzer.analyze(&program)
+    analyzer.analyze(program)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use analizador_lexico::lexer::Lexer;
+    use analizador_lexico::tokens::Token;
+
+    #[test]
+    fn analyzes_program_from_parser_output() {
+        let input = r#"
+            int main() {
+                int x = 5;
+                return x;
+            }
+        "#;
+
+        let mut lexer = Lexer::new(input);
+        let mut tokens = Vec::new();
+        loop {
+            let token = lexer.next_token_with_position();
+            tokens.push(token.clone());
+            if matches!(token.token, Token::EOF) {
+                break;
+            }
+        }
+
+        let mut parser = analizador_sintactico::parser::Parser::new(tokens);
+        let program = parser.parse_program();
+
+        assert!(analyze_program(&program).is_ok());
+    }
 
     #[test]
     fn accepts_valid_assignments_and_returns() {
