@@ -151,7 +151,7 @@ impl SemanticAnalyzer {
                     self.error("'continue' solo puede usarse dentro de un bucle".to_string(), span.line, span.column);
                 }
             }
-            Statement::Block { statements, span } => {
+            Statement::Block { statements, span: _ } => {
                 self.enter_scope();
                 for stmt in statements {
                     self.analyze_statement(stmt);

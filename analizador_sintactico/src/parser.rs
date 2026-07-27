@@ -281,7 +281,7 @@ impl Parser {
             Token::KeyWord(ref kw) if kw == "break" => self.parse_break_statement(),
             Token::KeyWord(ref kw) if kw == "continue" => self.parse_continue_statement(),
             Token::KeyWord(ref kw) if ["int", "double", "char", "void", "let"].contains(&kw.as_str()) => {
-                if self.peek_delimiter('(') {
+                if self.peek2_delimiter('(') {
                     self.parse_function_definition()
                 } else {
                     self.parse_declaration_statement()
@@ -611,8 +611,10 @@ impl Parser {
                     expr = Expression::Index { base: Box::new(expr), index: Box::new(index), span: current_span };
                 }
 
-                if self.peek_delimiter('(') {
+                if self.current_token_is_delimiter('(') {
+                    self.next_token();
                     let arguments = self.parse_call_arguments();
+                    self.expect_delimiter(')');
                     let span = self.current_span();
                     expr = Expression::Call { name: match &expr { Expression::Identifier(name, _) => name.clone(), _ => String::new() }, arguments, span };
                 }
@@ -773,5 +775,17 @@ impl Parser {
 
     fn peek_delimiter(&self, delimiter: char) -> bool {
         matches!(&self.peek_token().token, Token::Delimiter(value) if *value == delimiter)
+    }
+
+    fn peek2_token(&self) -> &TokenInfo {
+        if self.position + 2 < self.tokens.len() {
+            &self.tokens[self.position + 2]
+        } else {
+            self.current_token()
+        }
+    }
+
+    fn peek2_delimiter(&self, delimiter: char) -> bool {
+        matches!(&self.peek2_token().token, Token::Delimiter(value) if *value == delimiter)
     }
 }
