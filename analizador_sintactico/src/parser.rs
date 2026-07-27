@@ -7,8 +7,16 @@ pub struct Span {
 }
 
 #[derive(Debug, Clone)]
+pub struct ParseError {
+    pub message: String,
+    pub line: usize,
+    pub column: usize,
+}
+
+#[derive(Debug, Clone)]
 pub struct Program {
     pub statements: Vec<Statement>,
+    pub errors: Vec<ParseError>,
 }
 
 #[derive(Debug, Clone)]
@@ -249,26 +257,36 @@ impl std::fmt::Display for Literal {
 pub struct Parser {
     tokens: Vec<TokenInfo>,
     position: usize,
+    pending: Vec<Statement>,
+    errors: Vec<ParseError>,
 }
 
 impl Parser {
     pub fn new(tokens: Vec<TokenInfo>) -> Self {
-        Parser { tokens, position: 0 }
+        Parser { tokens, position: 0, pending: Vec::new(), errors: Vec::new() }
     }
 
     pub fn parse_program(&mut self) -> Program {
         let mut statements = Vec::new();
         while !self.current_token_is_eof() {
+            let pos_before = self.position;
             if let Some(statement) = self.parse_statement() {
                 statements.push(statement);
             } else {
                 if self.current_token_is_eof() {
                     break;
                 }
+                self.recover_to_statement_boundary();
+            }
+            while let Some(extra) = self.pending.pop() {
+                statements.push(extra);
+            }
+            if self.position == pos_before && !self.current_token_is_eof() {
                 self.next_token();
             }
         }
-        Program { statements }
+        let errors = std::mem::take(&mut self.errors);
+        Program { statements, errors }
     }
 
     fn parse_statement(&mut self) -> Option<Statement> {
@@ -309,6 +327,19 @@ impl Parser {
         } else {
             None
         };
+
+        while self.current_token_is_punctuation(',') {
+            self.next_token();
+            let extra_name = self.parse_identifier()?;
+            self.parse_array_suffix();
+            let extra_value = if self.current_token_is_operator("=") {
+                self.next_token();
+                Some(self.parse_expression()?)
+            } else {
+                None
+            };
+            self.pending.push(Statement::Declaration { kind: kind.clone(), name: extra_name, value: extra_value, span });
+        }
 
         self.expect_punctuation(';');
         Some(Statement::Declaration { kind, name, value, span })
@@ -437,6 +468,9 @@ impl Parser {
                 statements.push(statement);
             } else {
                 self.next_token();
+            }
+            while let Some(extra) = self.pending.pop() {
+                statements.push(extra);
             }
         }
         self.expect_delimiter('}')?;
@@ -708,6 +742,8 @@ impl Parser {
             self.next_token();
             Some(())
         } else {
+            let span = self.current_span();
+            self.parse_error(format!("Se esperaba '{}', se encontró {:?}", keyword, self.current_token().token), span.line, span.column);
             None
         }
     }
@@ -717,6 +753,8 @@ impl Parser {
             self.next_token();
             Some(())
         } else {
+            let span = self.current_span();
+            self.parse_error(format!("Se esperaba '{}', se encontró {:?}", punctuation, self.current_token().token), span.line, span.column);
             None
         }
     }
@@ -726,7 +764,24 @@ impl Parser {
             self.next_token();
             Some(())
         } else {
+            let span = self.current_span();
+            self.parse_error(format!("Se esperaba '{}', se encontró {:?}", delimiter, self.current_token().token), span.line, span.column);
             None
+        }
+    }
+
+    fn parse_error(&mut self, message: String, line: usize, column: usize) {
+        self.errors.push(ParseError { message, line, column });
+    }
+
+    fn recover_to_statement_boundary(&mut self) {
+        while !self.current_token_is_eof() {
+            match &self.current_token().token {
+                Token::Punctuation(';') => { self.next_token(); return; }
+                Token::Delimiter('{') | Token::Delimiter('}') => return,
+                Token::KeyWord(kw) if ["if", "while", "for", "return", "int", "double", "char", "void", "let", "do", "break", "continue"].contains(&kw.as_str()) => return,
+                _ => self.next_token(),
+            }
         }
     }
 

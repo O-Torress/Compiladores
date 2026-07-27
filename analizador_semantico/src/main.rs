@@ -33,6 +33,14 @@ fn main() {
     let mut parser = Parser::new(tokens);
     let program = parser.parse_program();
 
+    if !program.errors.is_empty() {
+        println!("--- Errores de Sintaxis ---");
+        for err in &program.errors {
+            println!("- {} (linea {}, columna {})", err.message, err.line, err.column);
+        }
+        println!();
+    }
+
     println!("--- Árbol Sintáctico ---");
     program.print();
 

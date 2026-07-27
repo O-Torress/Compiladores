@@ -37,4 +37,11 @@ fn main() {
 
     println!("--- Árbol Sintáctico ---");
     program.print();
+
+    if !program.errors.is_empty() {
+        eprintln!("\n--- Errores de Sintaxis ---");
+        for err in &program.errors {
+            eprintln!("- {} (linea {}, columna {})", err.message, err.line, err.column);
+        }
+    }
 }

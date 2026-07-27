@@ -11,6 +11,8 @@ pub enum PrimitiveType {
     Void,
     String,
     Bool,
+    Array(Box<PrimitiveType>),
+    Pointer(Box<PrimitiveType>),
     Unknown,
 }
 
@@ -34,15 +36,35 @@ pub struct SemanticError {
     pub message: String,
     pub line: usize,
     pub column: usize,
+    pub kind: ErrorKind,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Clone, PartialEq)]
+pub enum ErrorKind {
+    Error,
+    Warning,
+}
+
 pub struct SemanticAnalyzer {
     errors: Vec<SemanticError>,
     scopes: Vec<HashMap<String, Symbol>>,
     functions: HashMap<String, FunctionSignature>,
     current_function: Option<FunctionSignature>,
     loop_depth: usize,
+    scope_count: usize,
+}
+
+impl Default for SemanticAnalyzer {
+    fn default() -> Self {
+        Self {
+            errors: Vec::new(),
+            scopes: Vec::new(),
+            functions: HashMap::new(),
+            current_function: None,
+            loop_depth: 0,
+            scope_count: 0,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -50,6 +72,7 @@ pub struct FunctionSignature {
     pub name: String,
     pub return_type: PrimitiveType,
     pub parameters: Vec<(String, PrimitiveType)>,
+    pub variadic: bool,
 }
 
 impl SemanticAnalyzer {
@@ -66,7 +89,7 @@ impl SemanticAnalyzer {
         if self.errors.is_empty() {
             Ok(())
         } else {
-            Err(self.errors.clone())
+            Err(std::mem::take(&mut self.errors))
         }
     }
 
@@ -153,25 +176,70 @@ impl SemanticAnalyzer {
             }
             Statement::Block { statements, span: _ } => {
                 self.enter_scope();
+                let mut has_unconditional_return = false;
                 for stmt in statements {
+                    if has_unconditional_return {
+                        self.warning("Código inalcanzable después de 'return'".to_string(), self.statement_span(stmt).line, self.statement_span(stmt).column);
+                        break;
+                    }
                     self.analyze_statement(stmt);
+                    if matches!(stmt, Statement::Return { .. }) {
+                        has_unconditional_return = true;
+                    }
                 }
                 self.leave_scope();
             }
-            Statement::FunctionDefinition { name, return_type, body, .. } => {
+            Statement::FunctionDefinition { name, return_type, parameters, body, span } => {
+                let mut seen_params = std::collections::HashSet::new();
+                let mut parsed_params = Vec::new();
+                for (pname, ptype) in parameters {
+                    if !seen_params.insert(pname.clone()) {
+                        self.error(format!("El parámetro '{}' está duplicado en '{}'", pname, name), span.line, span.column);
+                    }
+                    parsed_params.push((pname.clone(), self.parse_type(ptype)));
+                }
+
                 let signature = FunctionSignature {
                     name: name.clone(),
                     return_type: self.parse_type(return_type),
-                    parameters: Vec::new(),
+                    parameters: parsed_params.clone(),
+                    variadic: false,
                 };
                 self.functions.insert(name.clone(), signature.clone());
-                let previous_function = self.current_function.clone();
-                self.current_function = Some(signature);
+
+                let previous_function = std::mem::replace(&mut self.current_function, Some(signature));
                 self.enter_scope();
+
+                for (pname, ptype) in &parsed_params {
+                    let symbol = Symbol {
+                        name: pname.clone(),
+                        kind: SymbolKind::Variable,
+                        ty: ptype.clone(),
+                        line: span.line,
+                        column: span.column,
+                    };
+                    self.current_scope_mut().insert(pname.clone(), symbol);
+                }
+
                 self.analyze_statement(body);
                 self.leave_scope();
                 self.current_function = previous_function;
             }
+        }
+    }
+
+    fn statement_span(&self, stmt: &Statement) -> Span {
+        match stmt {
+            Statement::Declaration { span, .. }
+            | Statement::Expression { span, .. }
+            | Statement::If { span, .. }
+            | Statement::While { span, .. }
+            | Statement::DoWhile { span, .. }
+            | Statement::Return { span, .. }
+            | Statement::Break { span }
+            | Statement::Continue { span }
+            | Statement::Block { span, .. }
+            | Statement::FunctionDefinition { span, .. } => *span,
         }
     }
 
@@ -194,16 +262,30 @@ impl SemanticAnalyzer {
                 let right_type = self.analyze_expression_at(right, right.span());
                 self.check_binary_operation_at(operator, &left_type, &right_type, span)
             }
-            Expression::Unary { operand, .. } => self.analyze_expression_at(operand, operand.span()),
+            Expression::Unary { operator, operand, .. } => {
+                let operand_type = self.analyze_expression_at(operand, operand.span());
+                match operator.as_str() {
+                    "!" => PrimitiveType::Bool,
+                    "&" => PrimitiveType::Pointer(Box::new(operand_type)),
+                    "-" | "+" | "++" | "--" => operand_type,
+                    _ => operand_type,
+                }
+            }
             Expression::Call { name, arguments, span: call_span } => {
                 self.validate_function_call_at(name, arguments, *call_span)
             }
             Expression::Identifier(name, identifier_span) => self.lookup_variable_type_at(name, *identifier_span),
             Expression::Literal(lit, _) => self.literal_type(lit),
             Expression::Index { base, index, .. } => {
-                let _ = self.analyze_expression_at(base, base.span());
-                let _ = self.analyze_expression_at(index, index.span());
-                PrimitiveType::Unknown
+                let base_type = self.analyze_expression_at(base, base.span());
+                let index_type = self.analyze_expression_at(index, index.span());
+                if index_type != PrimitiveType::Int && index_type != PrimitiveType::Unknown {
+                    self.error(format!("El índice debe ser de tipo Int, se recibió {:?}", index_type), index.span().line, index.span().column);
+                }
+                match base_type {
+                    PrimitiveType::Array(inner) => *inner,
+                    _ => base_type,
+                }
             }
         }
     }
@@ -214,7 +296,7 @@ impl SemanticAnalyzer {
 
     fn validate_function_call_at(&mut self, name: &str, arguments: &[Expression], span: Span) -> PrimitiveType {
         if let Some(signature) = self.functions.get(name).cloned() {
-            if signature.parameters.len() != arguments.len() {
+            if !signature.variadic && signature.parameters.len() != arguments.len() {
                 self.error(
                     format!("La función '{}' espera {} argumentos, recibió {}", name, signature.parameters.len(), arguments.len()),
                     span.line,
@@ -225,13 +307,15 @@ impl SemanticAnalyzer {
 
             for (index, arg) in arguments.iter().enumerate() {
                 let arg_type = self.analyze_expression(arg);
-                let expected_type = &signature.parameters[index].1;
-                if !self.types_are_compatible(expected_type, &arg_type) {
-                    self.error(
-                        format!("El argumento {} de '{}' no coincide con el tipo esperado {:?}", index + 1, name, expected_type),
-                        span.line,
-                        span.column,
-                    );
+                if index < signature.parameters.len() {
+                    let expected_type = &signature.parameters[index].1;
+                    if !self.types_are_compatible(expected_type, &arg_type) {
+                        self.error(
+                            format!("El argumento {} de '{}' no coincide con el tipo esperado {:?}", index + 1, name, expected_type),
+                            span.line,
+                            span.column,
+                        );
+                    }
                 }
             }
 
@@ -242,19 +326,22 @@ impl SemanticAnalyzer {
         }
     }
 
-
     fn check_binary_operation_at(&mut self, operator: &str, left: &PrimitiveType, right: &PrimitiveType, span: Span) -> PrimitiveType {
         match operator {
             "+" | "-" | "*" | "/" | "%" => {
-                if left == right {
-                    left.clone()
+                if self.types_are_compatible(left, right) {
+                    if left == &PrimitiveType::Double || right == &PrimitiveType::Double {
+                        PrimitiveType::Double
+                    } else {
+                        left.clone()
+                    }
                 } else {
                     self.error(format!("La operación '{}' no es válida para tipos {:?} y {:?}", operator, left, right), span.line, span.column);
                     PrimitiveType::Unknown
                 }
             }
             "==" | "!=" | "<" | ">" | "<=" | ">=" => {
-                if left == right {
+                if self.types_are_compatible(left, right) {
                     PrimitiveType::Bool
                 } else {
                     self.error(format!("La comparación '{}' no es válida para tipos {:?} y {:?}", operator, left, right), span.line, span.column);
@@ -272,7 +359,6 @@ impl SemanticAnalyzer {
             _ => PrimitiveType::Unknown,
         }
     }
-
 
     fn ensure_boolean_condition_at(&mut self, expr: &Expression, span: Span) {
         let ty = self.analyze_expression_at(expr, span);
@@ -304,7 +390,13 @@ impl SemanticAnalyzer {
 
     fn literal_type(&self, literal: &Literal) -> PrimitiveType {
         match literal {
-            Literal::Number(_) => PrimitiveType::Int,
+            Literal::Number(value) => {
+                if value.contains('.') {
+                    PrimitiveType::Double
+                } else {
+                    PrimitiveType::Int
+                }
+            }
             Literal::String(_) => PrimitiveType::String,
             Literal::Char(_) => PrimitiveType::Char,
         }
@@ -316,41 +408,47 @@ impl SemanticAnalyzer {
         }
 
         match (declared, inferred) {
-            (PrimitiveType::Int, PrimitiveType::Double) => true,
-            (PrimitiveType::Double, PrimitiveType::Int) => true,
+            (PrimitiveType::Int, PrimitiveType::Double) | (PrimitiveType::Double, PrimitiveType::Int) => true,
+            (PrimitiveType::Int, PrimitiveType::Char) | (PrimitiveType::Char, PrimitiveType::Int) => true,
+            (PrimitiveType::Pointer(_), PrimitiveType::Pointer(_)) => true,
             _ => false,
         }
     }
 
     fn register_builtin_functions(&mut self) {
-        self.functions.insert(
-            "printf".to_string(),
-            FunctionSignature {
-                name: "printf".to_string(),
-                return_type: PrimitiveType::Int,
-                parameters: vec![("format".to_string(), PrimitiveType::String)],
-            },
-        );
-        self.functions.insert(
-            "scanf".to_string(),
-            FunctionSignature {
-                name: "scanf".to_string(),
-                return_type: PrimitiveType::Int,
-                parameters: vec![("format".to_string(), PrimitiveType::String)],
-            },
-        );
-        self.functions.insert(
-            "fmod".to_string(),
-            FunctionSignature {
-                name: "fmod".to_string(),
-                return_type: PrimitiveType::Double,
-                parameters: vec![("x".to_string(), PrimitiveType::Double), ("y".to_string(), PrimitiveType::Double)],
-            },
-        );
+        let builtins: Vec<(&str, PrimitiveType, Vec<(&str, PrimitiveType)>, bool)> = vec![
+            ("printf", PrimitiveType::Int, vec![("format", PrimitiveType::String)], true),
+            ("scanf", PrimitiveType::Int, vec![("format", PrimitiveType::String)], true),
+            ("puts", PrimitiveType::Int, vec![("s", PrimitiveType::String)], false),
+            ("putchar", PrimitiveType::Int, vec![("c", PrimitiveType::Int)], false),
+            ("getchar", PrimitiveType::Int, vec![], false),
+            ("malloc", PrimitiveType::Pointer(Box::new(PrimitiveType::Void)), vec![("size", PrimitiveType::Int)], false),
+            ("free", PrimitiveType::Void, vec![("ptr", PrimitiveType::Pointer(Box::new(PrimitiveType::Void)))], false),
+            ("strlen", PrimitiveType::Int, vec![("s", PrimitiveType::String)], false),
+            ("atoi", PrimitiveType::Int, vec![("s", PrimitiveType::String)], false),
+            ("atof", PrimitiveType::Double, vec![("s", PrimitiveType::String)], false),
+            ("fmod", PrimitiveType::Double, vec![("x", PrimitiveType::Double), ("y", PrimitiveType::Double)], false),
+        ];
+
+        for (name, ret, params, variadic) in builtins {
+            self.functions.insert(
+                name.to_string(),
+                FunctionSignature {
+                    name: name.to_string(),
+                    return_type: ret,
+                    parameters: params.into_iter().map(|(n, t)| (n.to_string(), t)).collect(),
+                    variadic,
+                },
+            );
+        }
     }
 
     fn error(&mut self, message: String, line: usize, column: usize) {
-        self.errors.push(SemanticError { message, line, column });
+        self.errors.push(SemanticError { message, line, column, kind: ErrorKind::Error });
+    }
+
+    fn warning(&mut self, message: String, line: usize, column: usize) {
+        self.errors.push(SemanticError { message, line, column, kind: ErrorKind::Warning });
     }
 
     fn current_scope(&self) -> &HashMap<String, Symbol> {
@@ -363,6 +461,7 @@ impl SemanticAnalyzer {
 
     fn enter_scope(&mut self) {
         self.scopes.push(HashMap::new());
+        self.scope_count += 1;
     }
 
     fn leave_scope(&mut self) {
@@ -473,5 +572,40 @@ mod tests {
         let errors = analyze_code(input).unwrap_err();
         let error = errors.first().unwrap();
         assert!(error.line > 1 || error.column > 1);
+    }
+
+    #[test]
+    fn detects_duplicate_parameters() {
+        let input = r#"
+            int sumar(int a, int a) {
+                return a;
+            }
+            int main() {
+                return sumar(1, 2);
+            }
+        "#;
+
+        let result = analyze_code(input);
+        assert!(result.is_err());
+        let errors = result.unwrap_err();
+        assert!(errors.iter().any(|e| e.message.contains("duplicado")));
+    }
+
+    #[test]
+    fn detects_dead_code_after_return() {
+        let input = r#"
+            int main() {
+                {
+                    return 0;
+                    int x = 5;
+                }
+                return 1;
+            }
+        "#;
+
+        let result = analyze_code(input);
+        assert!(result.is_err());
+        let errors = result.unwrap_err();
+        assert!(errors.iter().any(|e| e.message.contains("inalcanzable")));
     }
 }
