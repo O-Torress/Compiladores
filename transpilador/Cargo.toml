@@ -1,0 +1,8 @@
+[package]
+name = "transpilador"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+analizador_lexico = { path = "../analizador_lexico" }
+analizador_sintactico = { path = "../analizador_sintactico" }
