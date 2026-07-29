@@ -67,13 +67,37 @@ fn main() {
 
 fn preprocess(input: &str) -> String {
     let mut output = String::new();
-    for line in input.lines() {
-        let trimmed = line.trim();
-        if trimmed.starts_with('#') {
+    let chars: Vec<char> = input.chars().collect();
+    let mut i = 0;
+
+    while i < chars.len() {
+        if chars[i] == '/' && i + 1 < chars.len() {
+            if chars[i + 1] == '/' {
+                i += 2;
+                while i < chars.len() && chars[i] != '\n' {
+                    i += 1;
+                }
+                continue;
+            }
+            if chars[i + 1] == '*' {
+                i += 2;
+                while i + 1 < chars.len() && !(chars[i] == '*' && chars[i + 1] == '/') {
+                    i += 1;
+                }
+                if i + 1 < chars.len() {
+                    i += 2;
+                }
+                continue;
+            }
+        }
+        if chars[i] == '#' {
+            while i < chars.len() && chars[i] != '\n' {
+                i += 1;
+            }
             continue;
         }
-        output.push_str(line);
-        output.push('\n');
+        output.push(chars[i]);
+        i += 1;
     }
     output
 }

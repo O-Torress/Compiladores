@@ -101,7 +101,7 @@ impl SemanticAnalyzer {
 
     fn analyze_statement(&mut self, statement: &Statement) {
         match statement {
-            Statement::Declaration { kind, name, value, span } => {
+            Statement::Declaration { kind, name, value, span, .. } => {
                 let declared_type = match kind {
                     DeclarationKind::Typed(ty) => self.parse_type(ty),
                     DeclarationKind::Let => PrimitiveType::Unknown,
@@ -146,6 +146,17 @@ impl SemanticAnalyzer {
             }
             Statement::While { condition, body, span } => {
                 self.ensure_boolean_condition_at(condition, *span);
+                self.loop_depth += 1;
+                self.analyze_statement(body);
+                self.loop_depth -= 1;
+            }
+            Statement::For { init, condition, body, .. } => {
+                if let Some(init_stmt) = init {
+                    self.analyze_statement(init_stmt);
+                }
+                if let Some(cond) = condition {
+                    self.ensure_boolean_condition_at(cond, cond.span());
+                }
                 self.loop_depth += 1;
                 self.analyze_statement(body);
                 self.loop_depth -= 1;
@@ -234,6 +245,7 @@ impl SemanticAnalyzer {
             | Statement::Expression { span, .. }
             | Statement::If { span, .. }
             | Statement::While { span, .. }
+            | Statement::For { span, .. }
             | Statement::DoWhile { span, .. }
             | Statement::Return { span, .. }
             | Statement::Break { span }
@@ -286,6 +298,19 @@ impl SemanticAnalyzer {
                     PrimitiveType::Array(inner) => *inner,
                     _ => base_type,
                 }
+            }
+            Expression::Postfix { operator: _, operand, .. } => {
+                self.analyze_expression_at(operand, operand.span())
+            }
+            Expression::InitializerList { values, .. } => {
+                let mut elem_type = PrimitiveType::Unknown;
+                for v in values {
+                    let t = self.analyze_expression_at(v, v.span());
+                    if elem_type == PrimitiveType::Unknown {
+                        elem_type = t;
+                    }
+                }
+                PrimitiveType::Array(Box::new(elem_type))
             }
         }
     }

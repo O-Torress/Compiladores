@@ -157,11 +157,14 @@ impl Transpiler {
     fn transpile_statement(&mut self, stmt: &Statement) {
         match stmt {
             Statement::Declaration {
-                kind, name, value, ..
+                kind, name, is_array, value, ..
             } => {
                 let java_type = match kind {
-                    DeclarationKind::Typed(ty) => self.c_type_to_java(ty),
-                    DeclarationKind::Let => "var",
+                    DeclarationKind::Typed(ty) => {
+                        let base = self.c_type_to_java(ty);
+                        if *is_array { format!("{}[]", base) } else { base.to_string() }
+                    },
+                    DeclarationKind::Let => "var".to_string(),
                 };
                 self.emit_indent();
                 self.emit(&format!("{} {}", java_type, name));
@@ -196,17 +199,56 @@ impl Transpiler {
             Statement::While { condition, body, .. } => {
                 self.emit_indent();
                 self.emit("while (");
-                self.transpile_expression(condition);
+                self.transpile_condition(condition);
                 self.emit(") ");
                 self.transpile_block_open(body);
-                self.emit("}\n");
+                self.emit_line("}");
+            }
+            Statement::For {
+                init,
+                condition,
+                update,
+                body,
+                ..
+            } => {
+                self.emit_indent();
+                self.emit("for (");
+                if let Some(init_stmt) = init {
+                    if let Statement::Declaration { kind, name, is_array, value, .. } = init_stmt.as_ref() {
+                        let java_type = match kind {
+                            DeclarationKind::Typed(ty) => {
+                                let base = self.c_type_to_java(ty);
+                                if *is_array { format!("{}[]", base) } else { base.to_string() }
+                            },
+                            DeclarationKind::Let => "var".to_string(),
+                        };
+                        self.emit(&format!("{} {}", java_type, name));
+                        if let Some(expr) = value {
+                            self.emit(" = ");
+                            self.transpile_expression(expr);
+                        }
+                    } else if let Statement::Expression { expr, .. } = init_stmt.as_ref() {
+                        self.transpile_expression(expr);
+                    }
+                }
+                self.emit("; ");
+                if let Some(cond) = condition {
+                    self.transpile_condition(cond);
+                }
+                self.emit("; ");
+                if let Some(upd) = update {
+                    self.transpile_expression(upd);
+                }
+                self.emit(") ");
+                self.transpile_block_open(body);
+                self.emit_line("}");
             }
             Statement::DoWhile { body, condition, .. } => {
                 self.emit_line("do ");
                 self.transpile_block_open(body);
                 self.emit_indent();
                 self.emit("} while (");
-                self.transpile_expression(condition);
+                self.transpile_condition(condition);
                 self.emit(");\n");
             }
             Statement::Return { value, .. } => {
@@ -296,6 +338,23 @@ impl Transpiler {
         }
     }
 
+    fn is_boolean_expr(&self, expr: &Expression) -> bool {
+        matches!(
+            expr,
+            Expression::Binary { operator, .. }
+                if matches!(operator.as_str(), "==" | "!=" | "<" | ">" | "<=" | ">=" | "&&" | "||")
+        ) || matches!(expr, Expression::Unary { operator, .. } if operator == "!")
+    }
+
+    fn transpile_condition(&mut self, expr: &Expression) {
+        if self.is_boolean_expr(expr) {
+            self.transpile_expression(expr);
+        } else {
+            self.transpile_expression(expr);
+            self.emit(" != 0");
+        }
+    }
+
     fn transpile_if(
         &mut self,
         condition: &Expression,
@@ -304,7 +363,7 @@ impl Transpiler {
     ) {
         self.emit_indent();
         self.emit("if (");
-        self.transpile_expression(condition);
+        self.transpile_condition(condition);
         self.emit(") ");
         self.transpile_block_open(consequence);
         self.transpile_else_chain(alternative);
@@ -322,7 +381,7 @@ impl Transpiler {
                 {
                     self.emit_indent();
                     self.emit("} else if (");
-                    self.transpile_expression(condition);
+                    self.transpile_condition(condition);
                     self.emit(") ");
                     self.transpile_block_open(consequence);
                     self.transpile_else_chain(alternative);
@@ -401,6 +460,20 @@ impl Transpiler {
                 self.emit("[");
                 self.transpile_expression(index);
                 self.emit("]");
+            }
+            Expression::Postfix { operator, operand, .. } => {
+                self.transpile_expression(operand);
+                self.emit(operator);
+            }
+            Expression::InitializerList { values, .. } => {
+                self.emit("{");
+                for (i, v) in values.iter().enumerate() {
+                    if i > 0 {
+                        self.emit(", ");
+                    }
+                    self.transpile_expression(v);
+                }
+                self.emit("}");
             }
             Expression::Identifier(name, _) => {
                 self.emit(name);

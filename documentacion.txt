@@ -1,0 +1,356 @@
+DOCUMENTACION DEL TRANSPILADOR C-Like a Java
+==============================================
+
+INDICE
+  1. Arquitectura general
+  2. Los tres analizadores (dependencias)
+  3. Archivos del transpilador
+     3.1. Cargo.toml
+     3.2. src/main.rs
+     3.3. src/lib.rs
+     3.4. src/transpiler.rs
+  4. Flujo de transpilacion paso a paso
+  5. Manejo de tipos
+  6. Funciones builtin
+  7. Estructuras de control
+  8. Arreglos
+  9. Consideraciones y limitaciones
+
+
+1. ARQUITECTURA GENERAL
+----------------------
+
+El transpilador convierte codigo fuente en lenguaje C-like (un subconjunto
+de C) a codigo Java. No es un compilador tradicional: NO genera bytecode
+ni ejecutables. Toma un archivo .c y produce un archivo .java equivalente.
+
+La tuberia (pipeline) completa es:
+
+  Archivo .c
+      |
+      v
+  [PREPROCESADOR]  ->  main.rs (funcion preprocess)
+      |                 Elimina #include, #define, comentarios
+      v
+  [ANALIZADOR LEXICO]  ->  crate analizador_lexico
+      |                    Convierte el texto en tokens
+      v
+  [ANALIZADOR SINTACTICO]  ->  crate analizador_sintactico
+      |                         Construye el AST (arbol sintactico)
+      v
+  [ANALIZADOR SEMANTICO]  ->  crate analizador_semantico
+      |                        (No se usa actualmente en el pipeline)
+      v
+  [TRANSPILADOR]  ->  src/transpiler.rs
+      |               Recorre el AST y genera codigo Java
+      v
+  Archivo .java
+
+El transpilador depende de los tres analizadores como crates externos
+declarados en Cargo.toml con rutas locales (path = "../../analizador_...").
+
+
+2. LOS TRES ANALIZADORES (DEPENDENCIAS)
+---------------------------------------
+
+2.1. analizador_lexico (analizador_lexico/)
+  - Ubicacion: ../../analizador_lexico/
+  - Archivo principal: src/lexer.rs, src/tokens.rs
+  - Funcion: Convierte una cadena de texto en una secuencia de tokens.
+  - Tokeniza: palabras clave (int, double, char, void, if, else, while,
+    for, do, return, break, continue, let), identificadores, numeros,
+    strings, caracteres, operadores (+, -, *, /, %, =, ==, !=, <, >, <=,
+    >=, &&, ||, !, &, ++, --, +=, -=, *=, /=, %=), delimitadores
+    ({, }, (, ), [, ]), y puntuacion (;, ,).
+  - El transpilador lo usa a traves de:
+      let mut lexer = Lexer::new(&codigo_limpio);
+      let token_info = lexer.next_token_with_position();
+
+2.2. analizador_sintactico (analizador_sintactico/)
+  - Ubicacion: ../../analizador_sintactico/
+  - Archivo principal: src/parser.rs
+  - Funcion: Toma una lista de tokens y construye un AST (Abstract Syntax
+    Tree) representado por las estructuras Program, Statement y Expression.
+  - El AST se define con estos enumerados (enum):
+      Statement:
+        - Declaration { kind, name, is_array, value, span }
+        - Expression { expr, span }
+        - If { condition, consequence, alternative, span }
+        - While { condition, body, span }
+        - For { init, condition, update, body, span }
+        - DoWhile { body, condition, span }
+        - Return { value, span }
+        - Break { span }
+        - Continue { span }
+        - Block { statements, span }
+        - FunctionDefinition { name, return_type, parameters, body, span }
+      Expression:
+        - Assignment { target, operator, value, span }
+        - Binary { operator, left, right, span }
+        - Unary { operator, operand, span }
+        - Call { name, arguments, span }
+        - Index { base, index, span }
+        - Postfix { operator, operand, span }
+        - InitializerList { values, span }
+        - Identifier(String, Span)
+        - Literal(Literal, Span)
+  - El transpilador lo usa mediante:
+      let mut parser = Parser::new(tokens);
+      let program = parser.parse_program();
+
+2.3. analizador_semantico (analizador_semantico/)
+  - Ubicacion: ../../analizador_semantico/
+  - Archivo principal: src/semantic.rs
+  - Funcion: Analiza el AST en busca de errores semanticos: tipos
+    incompatibles, variables no declaradas, uso incorrecto de break/
+    continue fuera de bucles, etc.
+  - Actualmente NO se ejecuta en el pipeline del transpilador (no hay
+    llamada a SemanticAnalyzer en main.rs). Esta disponible para
+    uso futuro si se desea validacion semantica antes de transpilar.
+
+
+3. ARCHIVOS DEL TRANSPILADOR
+----------------------------
+
+3.1. Cargo.toml
+  - Define el crate "transpilador" version 0.1.0.
+  - Declara las dependencias locales (por ruta) a los tres analizadores:
+      analizador_lexico = { path = "../../analizador_lexico" }
+      analizador_sintactico = { path = "../../analizador_sintactico" }
+      analizador_semantico = { path = "../../analizador_semantico" }
+  - La estructura del proyecto es "lib + bin" (tiene lib.rs y main.rs).
+
+3.2. src/main.rs
+  - Punto de entrada del ejecutable.
+  - Flujo:
+      a) Lee el argumento de linea de comandos (nombre del archivo .c).
+      b) Lee el contenido del archivo con fs::read_to_string().
+      c) Llama a preprocess() para limpiar el codigo fuente.
+      d) Crea un Lexer y extrae todos los tokens en un Vec.
+      e) Crea un Parser con los tokens y obtiene un Program (AST).
+      f) Si hay errores de sintaxis, los muestra en stderr.
+      g) Deriva el nombre de la clase Java a partir del nombre del
+         archivo (ej. "ej.c" -> "Ej").
+      h) Crea un Transpiler y llama a transpile(&program) para obtener
+         el codigo Java como String.
+      i) Escribe el resultado en un archivo .java.
+  - La funcion preprocess():
+      Recorre el texto caracter por caracter.
+      Elimina:
+        - Comentarios de linea (// hasta \n)
+        - Comentarios de bloque (/* ... */), incluso multilinea
+        - Directivas de preprocesador (#include, #define, etc.)
+      El codigo resultante es C "limpio" listo para lexear.
+
+3.3. src/lib.rs
+  - Archivo minimo que solo expone el modulo transpiler:
+      pub mod transpiler;
+  - Permite que otros crates usen transpilador::transpiler::Transpiler.
+
+3.4. src/transpiler.rs
+  - Archivo principal con la logica de conversion.
+  - Define la estructura Transpiler:
+      output: String          ->  Codigo Java en construccion
+      indent: usize           ->  Nivel de indentacion actual
+      needs_scanner: bool     ->  True si el codigo usa scanf
+      class_name: String      ->  Nombre de la clase Java
+      is_main_function: bool  ->  True cuando se transpila main()
+  - Metodos principales:
+      new(class_name)         ->  Constructor
+      transpile(&program)     ->  Punto de entrada: genera la clase Java
+      transpile_statement()   ->  Transpila un nodo Statement
+      transpile_expression()  ->  Transpila un nodo Expression
+      transpile_block_open()  ->  Abre un bloque { ... } con indentacion
+      transpile_if()          ->  Transpila if/else if/else
+      transpile_else_chain()  ->  Maneja la cadena else-if recursiva
+      transpile_condition()   ->  Convierte condiciones a boolean Java
+      transpile_builtin_call() ->  Transpila printf, puts, scanf, etc.
+      is_boolean_expr()       ->  Detecta si una expresion ya es booleana
+      c_type_to_java()        ->  Mapea tipos C a Java
+      is_builtin_function()   ->  Verifica si es una funcion incorporada
+      emit/emit_indent/emit_line ->  Metodos auxiliares de generacion
+
+
+4. FLUJO DE TRANSPILACION PASO A PASO
+-------------------------------------
+
+Ejemplo concreto: entrada "ej.c", salida "Ej.java".
+
+Paso 1 - Preprocesamiento (main.rs:preprocess):
+  Entrada: Texto crudo del .c incluyendo #include, comentarios, etc.
+  Proceso: Recorre caracter por caracter; cuando encuentra // salta
+           hasta \n; cuando encuentra /* salta hasta */; cuando encuentra
+           # salta hasta \n; cualquier otro caracter se copia a la salida.
+  Salida:  Codigo C limpio, solo con declaraciones y sentencias.
+
+Paso 2 - Lexico (analizador_lexico):
+  Entrada: Codigo C limpio (String).
+  Proceso: Lexer::new(&codigo) crea el lexer. Se llama
+           next_token_with_position() en un bucle hasta EOF.
+           Cada token incluye: tipo (Token), valor, linea, columna.
+  Salida:  Vec<TokenInfo> con todos los tokens del programa.
+
+Paso 3 - Sintactico (analizador_sintactico):
+  Entrada: Vec<TokenInfo>.
+  Proceso: Parser::new(tokens) crea el parser. parse_program() analiza
+           la secuencia de tokens y construye el AST:
+             Program {
+               statements: Vec<Statement>,
+               errors: Vec<ParseError>
+             }
+           Usa un algoritmo de descenso recursivo con una funcion por
+           cada construccion del lenguaje (parse_if_statement,
+           parse_while_statement, parse_for_statement, etc.).
+           Las expresiones se analizan con precedencia de operadores
+           mediante una cadena de funciones:
+             parse_expression
+               -> parse_assignment
+                 -> parse_logical_or
+                   -> parse_logical_and
+                     -> parse_equality
+                       -> parse_relational
+                         -> parse_additive
+                           -> parse_multiplicative
+                             -> parse_unary
+                               -> parse_postfix
+                                 -> parse_primary
+  Salida:  Program (AST completo).
+
+Paso 4 - Transpilacion (transpiler.rs):
+  Entrada: &Program (referencia al AST).
+  Proceso: Transpiler::transpile() recibe el programa y genera:
+    a) Encabezado: "// Generado por transpilador - C-like a Java"
+    b) Import de Scanner si es necesario (needs_scanner = true).
+    c) "public class <Nombre> {"
+    d) Por cada Statement en program.statements:
+       - Declaration -> "tipo nombre = valor;" (con is_array -> tipo[])
+       - Expression -> "expresion;"
+       - If -> "if (condicion) { ... } else { ... }"
+       - While -> "while (condicion) { ... }"
+       - For -> "for (init; cond; update) { ... }"
+       - DoWhile -> "do { ... } while (cond);"
+       - Return -> "return valor;" o "System.exit(valor);" en main
+       - Break -> "break;"
+       - Continue -> "continue;"
+       - Block -> "{ ... }"
+       - FunctionDefinition ->
+           "public static <tipo> <nombre>(<params>) { ... }"
+           Si es main(), se convierte a:
+           "public static void main(String[] args)"
+    e) Cierre de la clase: "}"
+  Salida:  String con el codigo Java completo.
+
+Paso 5 - Escritura:
+  El String resultante se escribe en un archivo "<Nombre>.java" en el
+  mismo directorio usando fs::write().
+
+
+5. MANEJO DE TIPOS
+------------------
+
+La funcion c_type_to_java() en transpiler.rs mapea tipos C a Java:
+
+  C         Java
+  ---       ----
+  int       int
+  double    double
+  char      char
+  void      void
+  float     float
+  long      long
+  short     short
+  otro      otro (se pasa igual)
+
+Para declaraciones con is_array = true (ej. int numeros[5]), se anade
+"[]" al tipo: "int[] numeros".
+
+
+6. FUNCIONES BUILTIN
+--------------------
+
+El transpilador reconoce funciones de la biblioteca estandar de C y las
+convierte a sus equivalentes en Java:
+
+  C                      Java
+  -                      ----
+  printf(...)            System.out.printf(...)
+  puts(...)              System.out.println(...)
+  putchar(c)             System.out.print(c)  (Simplificado)
+  scanf(...)             Scanner scan = new Scanner(System.in);
+                         variable = scan.nextInt(); / .nextDouble();
+  getchar()              (Se deja como llamada, requiere adaptacion)
+  strlen(s)              s.length()
+  atoi(s)                Integer.parseInt(s)
+  atof(s)                Double.parseDouble(s)
+  fmod(a, b)             a % b
+  malloc(n)              new byte[n]  (Simplificado)
+  free(p)                (Se omite, Java tiene GC)
+
+Cuando se detecta scanf, se anade "import java.util.Scanner;" al inicio
+del archivo Java y se declara un objeto Scanner al inicio de main().
+La primera llamada a scanf produce la declaracion del Scanner; las
+llamadas subsiguientes reutilizan el mismo objeto.
+
+
+7. ESTRUCTURAS DE CONTROL
+-------------------------
+
+7.1. if / else if / else
+  - Se transpila con transpile_if() y transpile_else_chain().
+  - La cadena else-if se maneja recursivamente: si el alternative de un
+    If es otro If, se emite "} else if (...)" en lugar de "} else { ... }".
+  - Las condiciones se convierten automaticamente a boolean Java mediante
+    transpile_condition(): si la expresion no es una comparacion ni
+    operador logico, se anade " != 0".
+
+7.2. while
+  - Se transpila directamente: "while (condicion) { ... }".
+  - La condicion tambien pasa por transpile_condition().
+
+7.3. for
+  - Se transpila como: "for (init; cond; update) { ... }".
+  - El init puede ser una declaracion (int i = 0) o una expresion (i = 0).
+  - La condicion pasa por transpile_condition().
+  - El update se transpila como expresion normal.
+
+7.4. do-while
+  - Se transpila como: "do { ... } while (cond);".
+
+7.5. return
+  - Dentro de main(): "return <expr>;" se convierte en
+    "System.exit(<expr>);". "return;" sin valor se deja como "return;".
+  - Fuera de main(): "return <expr>;" se transpila literal.
+
+
+8. ARREGLOS
+-----------
+
+El transpilador soporta:
+
+  - Declaracion con corchetes: int arr[5] -> int[] arr
+  - Inicializacion con lista: int arr[5] = {1, 2, 3} -> int[] arr = {1, 2, 3}
+  - Acceso por indice: arr[i] -> arr[i] (se transpila igual)
+  - Los corchetes en declaracion se detectan durante el parseo y se
+    almacenan en el campo is_array del nodo Declaration.
+
+El tamaNo explicito dentro de los corchetes (ej. [5]) se ignora porque
+Java no requiere el tamaNo en la declaracion; se infiere del inicializador.
+
+
+9. CONSIDERACIONES Y LIMITACIONES
+----------------------------------
+
+- El transpilador NO ejecuta el analizador semantico. Los errores de
+  tipo no se detectan antes de generar Java.
+- No soporta: struct, union, enum, punteros complejos, funciones
+  variadicas (excepto printf/scanf con soporte limitado), goto,
+  switch/case, preprocesador avanzado (#ifdef, #pragma, etc.).
+- Las condiciones numericas (if (x)) se convierten a (x != 0)
+  automaticamente. Esto funciona para enteros pero puede producir
+  resultados inesperados con otros tipos.
+- Los comentarios con caracteres no-ASCII (acentos, eNe) pueden
+  corromperse si el archivo fuente no esta en UTF-8 o si la consola
+  no soporta la codificacion.
+- El sangrado (indentacion) usa 4 espacios por nivel.
+- El nombre del archivo .c determina el nombre de la clase Java
+  (primera letra en mayuscula). Ej: "mi_programa.c" -> "Mi_programa.java".

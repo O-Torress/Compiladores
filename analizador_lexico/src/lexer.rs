@@ -123,7 +123,7 @@ impl Lexer {
 
     fn lookup_ident(&self, ident: String) -> Token {
         match ident.as_str() {
-            "void" | "int" | "double" | "char" | "if" | "else" | "while" | "return" | "let" | "do" => Token::KeyWord(ident),
+            "void" | "int" | "double" | "char" | "if" | "else" | "while" | "return" | "let" | "do" | "for" => Token::KeyWord(ident),
             _ => Token::Identifier(ident),
         }
     }

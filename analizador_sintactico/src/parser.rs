@@ -30,6 +30,7 @@ pub enum Statement {
     Declaration {
         kind: DeclarationKind,
         name: String,
+        is_array: bool,
         value: Option<Expression>,
         span: Span,
     },
@@ -45,6 +46,13 @@ pub enum Statement {
     },
     While {
         condition: Expression,
+        body: Box<Statement>,
+        span: Span,
+    },
+    For {
+        init: Option<Box<Statement>>,
+        condition: Option<Expression>,
+        update: Option<Expression>,
         body: Box<Statement>,
         span: Span,
     },
@@ -105,6 +113,15 @@ pub enum Expression {
         index: Box<Expression>,
         span: Span,
     },
+    Postfix {
+        operator: String,
+        operand: Box<Expression>,
+        span: Span,
+    },
+    InitializerList {
+        values: Vec<Expression>,
+        span: Span,
+    },
     Identifier(String, Span),
     Literal(Literal, Span),
 }
@@ -124,6 +141,8 @@ impl Expression {
             | Expression::Unary { span, .. }
             | Expression::Call { span, .. }
             | Expression::Index { span, .. }
+            | Expression::Postfix { span, .. }
+            | Expression::InitializerList { span, .. }
             | Expression::Identifier(_, span)
             | Expression::Literal(_, span) => *span,
         }
@@ -173,6 +192,23 @@ impl Statement {
                 println!("{}While", padding);
                 println!("{}  +-- Condition", padding);
                 condition.print(indent + 2);
+                println!("{}  +-- Body", padding);
+                body.print(indent + 2);
+            }
+            Statement::For { init, condition, update, body, .. } => {
+                println!("{}For", padding);
+                if let Some(init_stmt) = init {
+                    println!("{}  +-- Init", padding);
+                    init_stmt.print(indent + 2);
+                }
+                if let Some(cond) = condition {
+                    println!("{}  +-- Condition", padding);
+                    cond.print(indent + 2);
+                }
+                if let Some(upd) = update {
+                    println!("{}  +-- Update", padding);
+                    upd.print(indent + 2);
+                }
                 println!("{}  +-- Body", padding);
                 body.print(indent + 2);
             }
@@ -238,6 +274,16 @@ impl Expression {
                 base.print(indent + 1);
                 index.print(indent + 1);
             }
+            Expression::Postfix { operator, operand, .. } => {
+                println!("{}Postfix ({})", padding, operator);
+                operand.print(indent + 1);
+            }
+            Expression::InitializerList { values, .. } => {
+                println!("{}InitializerList", padding);
+                for v in values {
+                    v.print(indent + 1);
+                }
+            }
             Expression::Identifier(name, _) => println!("{}Identifier ({})", padding, name),
             Expression::Literal(literal, _) => println!("{}Literal ({})", padding, literal),
         }
@@ -294,6 +340,7 @@ impl Parser {
         match token {
             Token::KeyWord(ref kw) if kw == "if" => self.parse_if_statement(),
             Token::KeyWord(ref kw) if kw == "while" => self.parse_while_statement(),
+            Token::KeyWord(ref kw) if kw == "for" => self.parse_for_statement(),
             Token::KeyWord(ref kw) if kw == "do" => self.parse_do_while_statement(),
             Token::KeyWord(ref kw) if kw == "return" => self.parse_return_statement(),
             Token::KeyWord(ref kw) if kw == "break" => self.parse_break_statement(),
@@ -320,7 +367,7 @@ impl Parser {
 
         self.next_token();
         let name = self.parse_identifier()?;
-        self.parse_array_suffix();
+        let is_array = self.parse_array_suffix();
         let value = if self.current_token_is_operator("=") {
             self.next_token();
             Some(self.parse_expression()?)
@@ -331,18 +378,18 @@ impl Parser {
         while self.current_token_is_punctuation(',') {
             self.next_token();
             let extra_name = self.parse_identifier()?;
-            self.parse_array_suffix();
+            let extra_is_array = self.parse_array_suffix();
             let extra_value = if self.current_token_is_operator("=") {
                 self.next_token();
                 Some(self.parse_expression()?)
             } else {
                 None
             };
-            self.pending.push(Statement::Declaration { kind: kind.clone(), name: extra_name, value: extra_value, span });
+            self.pending.push(Statement::Declaration { kind: kind.clone(), name: extra_name, is_array: extra_is_array, value: extra_value, span });
         }
 
         self.expect_punctuation(';');
-        Some(Statement::Declaration { kind, name, value, span })
+        Some(Statement::Declaration { kind, name, is_array, value, span })
     }
 
     fn parse_function_definition(&mut self) -> Option<Statement> {
@@ -419,6 +466,48 @@ impl Parser {
         self.expect_delimiter(')')?;
         let body = Box::new(self.parse_statement()?);
         Some(Statement::While { condition, body, span })
+    }
+
+    fn parse_for_statement(&mut self) -> Option<Statement> {
+        let span = self.current_span();
+        self.next_token();
+        self.expect_delimiter('(')?;
+
+        let init = if self.current_token_is_punctuation(';') {
+            None
+        } else if let Token::KeyWord(ref kw) = self.current_token().token {
+            if ["int", "double", "char", "void", "let"].contains(&kw.as_str()) {
+                Some(Box::new(self.parse_declaration_statement()?))
+            } else {
+                let expr_span = self.current_span();
+                let expr = self.parse_expression()?;
+                self.expect_punctuation(';')?;
+                Some(Box::new(Statement::Expression { expr, span: expr_span }))
+            }
+        } else {
+            let expr_span = self.current_span();
+            let expr = self.parse_expression()?;
+            self.expect_punctuation(';')?;
+            Some(Box::new(Statement::Expression { expr, span: expr_span }))
+        };
+
+        let condition = if self.current_token_is_punctuation(';') {
+            None
+        } else {
+            let expr = self.parse_expression()?;
+            self.expect_punctuation(';')?;
+            Some(expr)
+        };
+
+        let update = if self.current_token_is_delimiter(')') {
+            None
+        } else {
+            Some(self.parse_expression()?)
+        };
+
+        self.expect_delimiter(')')?;
+        let body = Box::new(self.parse_statement()?);
+        Some(Statement::For { init, condition, update, body, span })
     }
 
     fn parse_do_while_statement(&mut self) -> Option<Statement> {
@@ -626,7 +715,22 @@ impl Parser {
                 return Some(Expression::Unary { operator, operand: Box::new(operand), span });
             }
         }
-        self.parse_primary()
+        self.parse_postfix()
+    }
+
+    fn parse_postfix(&mut self) -> Option<Expression> {
+        let mut expr = self.parse_primary()?;
+        while let Token::Operator(op) = &self.current_token().token {
+            if op == "++" || op == "--" {
+                let span = self.current_span();
+                let operator = op.clone();
+                self.next_token();
+                expr = Expression::Postfix { operator, operand: Box::new(expr), span };
+            } else {
+                break;
+            }
+        }
+        Some(expr)
     }
 
     fn parse_primary(&mut self) -> Option<Expression> {
@@ -679,6 +783,23 @@ impl Parser {
                 self.expect_delimiter(')')?;
                 expression
             }
+            Token::Delimiter('{') => {
+                let span = self.current_span();
+                self.next_token();
+                let mut values = Vec::new();
+                while !self.current_token_is_delimiter('}') && !self.current_token_is_eof() {
+                    if let Some(expr) = self.parse_expression() {
+                        values.push(expr);
+                    }
+                    if self.current_token_is_punctuation(',') {
+                        self.next_token();
+                    } else {
+                        break;
+                    }
+                }
+                self.expect_delimiter('}')?;
+                Some(Expression::InitializerList { values, span })
+            }
             _ => None,
         }
     }
@@ -717,14 +838,17 @@ impl Parser {
         }
     }
 
-    fn parse_array_suffix(&mut self) {
+    fn parse_array_suffix(&mut self) -> bool {
+        let mut is_array = false;
         while self.current_token_is_delimiter('[') {
+            is_array = true;
             self.next_token();
             if !self.current_token_is_delimiter(']') {
                 let _ = self.parse_expression();
             }
             self.expect_delimiter(']');
         }
+        is_array
     }
 
     fn consume_operator(&mut self) -> Option<String> {
